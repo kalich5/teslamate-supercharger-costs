@@ -1,0 +1,45 @@
+---
+# ══════════════════════════════════════════════════════════════
+#  TeslaMate Supercharger Cost Importer — Docker Compose
+#
+#  This service runs as a one-shot container triggered by cron.
+#  It is NOT a long-running daemon.
+#
+#  HOW TO USE:
+#  1. Copy .env.example → .env and fill in your values
+#  2. Run once interactively to authorise the Tesla token:
+#       docker compose run --rm importer
+#  3. Set up a cron job to call: docker compose run --rm importer
+# ══════════════════════════════════════════════════════════════
+
+services:
+
+  importer:
+    image: ghcr.io/YOUR_USERNAME/teslamate-supercharger-costs:latest
+    # Or build locally:
+    # build: .
+    container_name: teslamate-suc-importer
+    restart: "no"
+
+    env_file: .env
+
+    volumes:
+      - ./data:/data    # Tesla OAuth token cache (persisted across runs)
+      - ./logs:/logs    # Log files
+
+    networks:
+      - teslamate       # Must share the network with TeslaMate's database
+
+# ── Network ────────────────────────────────────────────────────
+# If you are adding this service to your EXISTING TeslaMate
+# docker-compose.yml, remove this networks section and instead
+# make sure the importer service is listed under the same
+# network that the `database` service uses.
+#
+# To find your TeslaMate network name:
+#   docker network ls | grep teslamate
+#
+networks:
+  teslamate:
+    external: true
+    name: teslamate_default   # ← change to match your actual network name

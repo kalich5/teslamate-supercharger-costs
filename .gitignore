@@ -1,0 +1,28 @@
+# Environment — never commit secrets
+.env
+
+# Token cache — contains your Tesla OAuth token
+data/
+*.json
+
+# Logs
+logs/
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
