@@ -396,6 +396,7 @@ def log_summary(stats: dict, dry_run: bool) -> None:
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 def main() -> None:
+    global LOOKBACK_DAYS
     parser = argparse.ArgumentParser(
         description="Import real Supercharger costs from Tesla API into TeslaMate",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -424,7 +425,6 @@ Examples:
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
 
-    global LOOKBACK_DAYS
     if args.lookback:
         LOOKBACK_DAYS = args.lookback
 
