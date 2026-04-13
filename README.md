@@ -47,7 +47,7 @@ Tesla API  ──►  importer.py  ──►  TeslaMate PostgreSQL
 ### 1 — Clone the repository
 
 ```bash
-git clone https://github.com/kalich5/teslamate-supercharger-costs.git
+git clone https://github.com/YOUR_USERNAME/teslamate-supercharger-costs.git
 cd teslamate-supercharger-costs
 ```
 
@@ -126,7 +126,7 @@ Example output:
 2025-11-01 18:15:00  INFO       Lookback:  30 days  |  Tolerance: 120s
 2025-11-01 18:15:00  INFO       Mode:      DRY-RUN (no writes)
 2025-11-01 18:15:00  INFO     ═══════════════════════════════════════════════════════
-2025-11-01 18:15:01  INFO     Vehicle: My Tesla (VIN: 5YJxxxxxxxxxxxxxx)
+2025-11-01 18:15:01  INFO     Vehicle: My Tesla (VIN: 5YJSA7E52PF497955)
 2025-11-01 18:15:02  INFO     Retrieved 6 sessions from Tesla API
 2025-11-01 18:15:02  INFO       DRY-RUN    #42  2025-11-01 18:13  Humpolec 2   → 75.91 CZK  (75.91  [7.299 kWh @ 10.4 CZK/kWh])
 2025-11-01 18:15:02  INFO       DRY-RUN    #43  2025-11-01 18:17  Humpolec 2   → 114.41 CZK (114.41 [11.001 kWh @ 10.4 CZK/kWh])
