@@ -47,7 +47,7 @@ Tesla API  ──►  importer.py  ──►  TeslaMate PostgreSQL
 ### 1 — Clone the repository
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/teslamate-supercharger-costs.git
+git clone https://github.com/kalich5/teslamate-supercharger-costs.git
 cd teslamate-supercharger-costs
 ```
 
