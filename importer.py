@@ -352,9 +352,16 @@ def import_to_teslamate(sessions: list[dict], dry_run: bool) -> dict:
             continue
 
         try:
+            converted = convert_currency(
+                cost_info['total'],
+                 currency_code,
+                 TARGET_CURRENCY,
+                 charge_start_datetime
+            )
+
             cur.execute(
-                "UPDATE charging_processes SET cost = convert_currency(%s WHERE id = %s",, currency_code, TARGET_CURRENCY, charge_start_datetime)
-                (cost_info["total"], tm_id),
+                "UPDATE charging_processes SET cost = %s WHERE id = %s",
+                (converted, tm_id),
             )
             log.info(
                 f"  UPDATED    #{tm_id}  {tm_start:%Y-%m-%d %H:%M}  {location}  "
