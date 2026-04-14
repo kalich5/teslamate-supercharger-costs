@@ -151,17 +151,23 @@ _rates_cache = {}
 
 def get_rate(date, currency):
     key = (date.strftime("%Y-%m-%d"), currency)
-    if key in _rates_cache:
-        return _rates_cache[key]
 
-    url = f"https://api.exchangerate.host/{key[0]}"
-    params = {"base": "EUR", "symbols": currency}
+    if key in _rates:
+        return _rates[key]
+
+    url = f"https://api.frankfurter.app/{key[0]}"
+    params = {"from": "EUR", "to": currency}
 
     r = requests.get(url, params=params, timeout=5)
     r.raise_for_status()
-    rate = r.json()["rates"][currency]
 
-    _rates_cache[key] = rate
+    data = r.json()
+
+    if "rates" not in data or currency not in data["rates"]:
+        raise Exception(f"FX rate not found for {currency} on {key[0]}")
+
+    rate = data["rates"][currency]
+    _rates[key] = rate
     return rate
 
 
