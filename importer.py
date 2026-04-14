@@ -316,84 +316,57 @@ def import_to_teslamate(sessions: list[dict], dry_run: bool) -> dict:
             stats["errors"] += 1
             continue
 
-        row = cur.fetchone()
+tm_id, tm_start, tm_cost = row
 
-        if row is None:
-            log.warning(
-                f"  NOT FOUND  {start_dt:%Y-%m-%d %H:%M}  {location}  "
-                f"{cost_info['total']:.2f} {cost_info['currency']}"
-            )
-            stats["not_found"] += 1
-            continue
+if tm_cost is not None and not OVERWRITE_EXISTING:
+    log.debug(
+        f"  skipped    #{tm_id}  {tm_start:%Y-%m-%d %H:%M}  "
+        f"{location}  (already set: {tm_cost:.2f})"
+    )
+    stats["already_set"] += 1
+    continue
 
-        try:
-            currency_code = cost_info['currency']
+# Build detail string
+detail = f"{cost_info['charging']:.2f}"
+if cost_info["congestion"] > 0:
+    detail += f" + idle: {cost_info['congestion']:.2f}"
+if cost_info["kwh"]:
+    detail += f"  [{cost_info['kwh']:.3f} kWh @ {cost_info['rate']} {cost_info['currency']}/kWh]"
 
-            converted = convert_currency(
-                cost_info['total'],
-                currency_code,
-                TARGET_CURRENCY,
-                charge_start_datetime
-            )
+if dry_run:
+    log.info(
+        f"  DRY-RUN    #{tm_id}  {tm_start:%Y-%m-%d %H:%M}  {location}  "
+        f"→ {cost_info['total']:.2f} {cost_info['currency']}  ({detail})"
+    )
+    stats["would_update"] += 1
+    continue
 
-        if tm_cost is not None and not OVERWRITE_EXISTING:
-            log.debug(
-                f"  skipped    #{tm_id}  {tm_start:%Y-%m-%d %H:%M}  "
-                f"{location}  (already set: {tm_cost:.2f})"
-            )
-            stats["already_set"] += 1
-            continue
+try:
+    currency_code = cost_info['currency']
 
-        # Build a human-readable detail string for the log line
-        detail = f"{cost_info['charging']:.2f}"
-        if cost_info["congestion"] > 0:
-            detail += f" + idle: {cost_info['congestion']:.2f}"
-        if cost_info["kwh"]:
-            detail += f"  [{cost_info['kwh']:.3f} kWh @ {cost_info['rate']} {cost_info['currency']}/kWh]"
+    converted = convert_currency(
+        cost_info['total'],
+        currency_code,
+        TARGET_CURRENCY,
+        start_dt
+    )
 
-        if dry_run:
-            log.info(
-                f"  DRY-RUN    #{tm_id}  {tm_start:%Y-%m-%d %H:%M}  {location}  "
-                f"→ {cost_info['total']:.2f} {cost_info['currency']}  ({detail})"
-            )
-            stats["would_update"] += 1
-            continue
+    cur.execute(
+        "UPDATE charging_processes SET cost = %s WHERE id = %s",
+        (converted, tm_id),
+    )
 
-        try:
-            converted = convert_currency(
-                cost_info['total'],
-                 currency_code,
-                 TARGET_CURRENCY,
-                 charge_start_datetime
-            )
+    log.info(
+        f"UPDATED #{tm_id} {tm_start:%Y-%m-%d %H:%M} {location} "
+        f"{cost_info['total']:.2f} {currency_code} → {converted:.2f} {TARGET_CURRENCY} ({detail})"
+    )
 
-        # Add before conversion
-            currency_code = cost_info['currency']
+    stats["updated"] += 1
 
-            converted = convert_currency(
-                cost_info['total'],
-                currency_code,
-                TARGET_CURRENCY,
-                charge_start_datetime
-            )  
-
-        # Correct SQL update
-            cur.execute(
-               "UPDATE charging_processes SET cost = %s WHERE id = %s",
-                (converted, tm_id),
-            )
-
-        # Optional improved logging
-            log.info(
-            f"UPDATED #{tm_id} {tm_start:%Y-%m-%d %H:%M} {location} "
-            f"{cost_info['total']:.2f} {currency_code} → {converted:.2f} {TARGET_CURRENCY} ({detail})"
-        )
-
-            stats["updated"] += 1
-        except Exception as e:
-            log.error(f"DB error updating #{tm_id}: {e}")
-            conn.rollback()
-            stats["errors"] += 1
+except Exception as e:
+    log.error(f"DB error updating #{tm_id}: {e}")
+    conn.rollback()
+    stats["errors"] += 1
 
     if not dry_run:
         conn.commit()
