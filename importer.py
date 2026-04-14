@@ -173,15 +173,17 @@ def get_rate(date, currency):
 
 def convert_currency(amount, from_currency, to_currency, date):
     if from_currency == to_currency:
-        return amount
+        return round(amount, 2)
 
     if from_currency != "EUR":
-        amount = amount / get_rate(date, from_currency)
+        rate_from = get_rate(date, from_currency)
+        amount = amount / rate_from
 
     if to_currency != "EUR":
-        amount = amount * get_rate(date, to_currency)
+        rate_to = get_rate(date, to_currency)
+        amount = amount * rate_to
 
-    return amount
+    return round(amount, 2)
 
 
 # ── MAIN ──────────────────────────────────────────────────────────────────────
