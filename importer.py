@@ -326,7 +326,8 @@ def import_to_teslamate(sessions: list[dict], dry_run: bool) -> dict:
             stats["not_found"] += 1
             continue
 
-        currency_code = cost_info['currency']
+        try:
+            currency_code = cost_info['currency']
 
             converted = convert_currency(
                 cost_info['total'],
@@ -377,7 +378,7 @@ def import_to_teslamate(sessions: list[dict], dry_run: bool) -> dict:
             )  
 
         # Correct SQL update
-             cur.execute(
+            cur.execute(
                "UPDATE charging_processes SET cost = %s WHERE id = %s",
                 (converted, tm_id),
             )
