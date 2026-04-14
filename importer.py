@@ -359,14 +359,28 @@ def import_to_teslamate(sessions: list[dict], dry_run: bool) -> dict:
                  charge_start_datetime
             )
 
+        # Add before conversion
+            currency_code = cost_info['currency']
+
+            converted = convert_currency(
+                cost_info['total'],
+                currency_code,
+                TARGET_CURRENCY,
+                charge_start_datetime
+            )  
+
+        # Correct SQL update
             cur.execute(
-                "UPDATE charging_processes SET cost = %s WHERE id = %s",
-                (converted, tm_id),
-            )
+            "UPDATE charging_processes SET cost = %s WHERE id = %s",
+            (converted, tm_id),
+        )
+
+        # Optional improved logging
             log.info(
-                f"  UPDATED    #{tm_id}  {tm_start:%Y-%m-%d %H:%M}  {location}  "
-                f"→ {cost_info['total']:.2f} {cost_info['currency']}  ({detail})"
-            )
+            f"UPDATED #{tm_id} {tm_start:%Y-%m-%d %H:%M} {location} "
+            f"{cost_info['total']:.2f} {currency_code} → {converted:.2f} {TARGET_CURRENCY} ({detail})"
+        )
+
             stats["updated"] += 1
         except Exception as e:
             log.error(f"DB error updating #{tm_id}: {e}")
