@@ -152,8 +152,8 @@ _rates_cache = {}
 def get_rate(date, currency):
     key = (date.strftime("%Y-%m-%d"), currency)
 
-    if key in _rates:
-        return _rates[key]
+    if key in _rates_cache:
+        return _rates_cache[key]
 
     url = f"https://api.frankfurter.app/{key[0]}"
     params = {"from": "EUR", "to": currency}
@@ -167,7 +167,7 @@ def get_rate(date, currency):
         raise Exception(f"FX rate not found for {currency} on {key[0]}")
 
     rate = data["rates"][currency]
-    _rates[key] = rate
+    _rates_cache[key] = rate
     return rate
 
 
