@@ -326,7 +326,14 @@ def import_to_teslamate(sessions: list[dict], dry_run: bool) -> dict:
             stats["not_found"] += 1
             continue
 
-        tm_id, tm_start, tm_cost = convert_currency(row, currency_code, TARGET_CURRENCY, charge_start_datetime)
+        currency_code = cost_info['currency']
+
+            converted = convert_currency(
+                cost_info['total'],
+                currency_code,
+                TARGET_CURRENCY,
+                charge_start_datetime
+            )
 
         if tm_cost is not None and not OVERWRITE_EXISTING:
             log.debug(
@@ -370,10 +377,10 @@ def import_to_teslamate(sessions: list[dict], dry_run: bool) -> dict:
             )  
 
         # Correct SQL update
-            cur.execute(
-            "UPDATE charging_processes SET cost = %s WHERE id = %s",
-            (converted, tm_id),
-        )
+             cur.execute(
+               "UPDATE charging_processes SET cost = %s WHERE id = %s",
+                (converted, tm_id),
+            )
 
         # Optional improved logging
             log.info(
