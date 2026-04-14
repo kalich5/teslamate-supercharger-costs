@@ -264,6 +264,127 @@ If you see many **NOT FOUND** warnings, try increasing `TIME_TOLERANCE_S` to `30
 
 ---
 
+## 💱 Currency Conversion (NEW)
+
+This importer can automatically convert all charging costs into a single target currency (e.g. CHF).
+
+- Uses European Central Bank (ECB)
+- No API key required
+- Uses **historical rates based on charging date**
+- Cached for performance with fallback to latest rates
+
+Example:
+
+```
+228.47 CZK → 9.12 CHF (rate from 2026-04-09)
+```
+
+---
+
+## 🔄 Backfill Existing Data (IMPORTANT)
+
+You can convert already stored historical data:
+
+```yaml
+LOOKBACK_DAYS: 730
+OVERWRITE_EXISTING: "true"
+```
+
+Run once:
+
+```bash
+docker compose run --rm importer
+```
+
+Then revert:
+
+```yaml
+OVERWRITE_EXISTING: "false"
+LOOKBACK_DAYS: 30
+```
+
+This rewrites all past Supercharger costs into your target currency.
+
+---
+
+## 📊 Grafana Analytics (Advanced)
+
+You can now build powerful dashboards in TeslaMate Grafana:
+
+### Cost per km
+
+```sql
+SELECT
+  d.start_date,
+  (d.cost / NULLIF(d.distance, 0)) AS cost_per_km
+FROM drives d
+WHERE d.distance > 0
+```
+
+### Cost per 100 km
+
+```sql
+SELECT
+  (d.cost / NULLIF(d.distance, 0)) * 100 AS cost_per_100km
+FROM drives d
+WHERE d.distance > 0
+```
+
+### Cost per kWh
+
+```sql
+SELECT
+  (cp.cost / NULLIF(cp.charge_energy_added, 0)) AS cost_per_kwh
+FROM charging_processes cp
+WHERE cp.charge_energy_added > 0
+```
+
+### Efficiency (kWh/km)
+
+```sql
+SELECT
+  (d.consumption_kwh / NULLIF(d.distance, 0)) AS kwh_per_km
+FROM drives d
+WHERE d.distance > 0
+```
+
+### 🌍 Map of expensive Superchargers
+
+```sql
+SELECT
+  cp.latitude,
+  cp.longitude,
+  (cp.cost / cp.charge_energy_added) AS price
+FROM charging_processes cp
+WHERE cp.charge_energy_added > 0
+```
+
+### 🧠 Anomaly detection
+
+```sql
+WITH stats AS (
+  SELECT
+    AVG(cp.cost / cp.charge_energy_added) AS avg_price,
+    STDDEV(cp.cost / cp.charge_energy_added) AS std_price
+  FROM charging_processes cp
+)
+SELECT *
+FROM charging_processes cp, stats
+WHERE ABS((cp.cost / cp.charge_energy_added) - stats.avg_price) > 2 * stats.std_price
+```
+
+---
+
+## 🧠 What this enables
+
+- Unified currency across all sessions
+- Accurate historical cost tracking
+- Cost/km and cost/kWh analytics
+- Detection of expensive charging sessions
+- Optimization of charging locations
+
+---
+
 ## Project layout
 
 ```
