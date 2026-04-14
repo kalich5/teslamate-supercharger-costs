@@ -13,6 +13,7 @@ import os
 import sys
 import json
 import logging
+import requests
 import argparse
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -325,7 +326,7 @@ def import_to_teslamate(sessions: list[dict], dry_run: bool) -> dict:
             stats["not_found"] += 1
             continue
 
-        tm_id, tm_start, tm_cost = row
+        tm_id, tm_start, tm_cost = convert_currency(row, currency_code, TARGET_CURRENCY, charge_start_datetime)
 
         if tm_cost is not None and not OVERWRITE_EXISTING:
             log.debug(
@@ -352,7 +353,7 @@ def import_to_teslamate(sessions: list[dict], dry_run: bool) -> dict:
 
         try:
             cur.execute(
-                "UPDATE charging_processes SET cost = %s WHERE id = %s",
+                "UPDATE charging_processes SET cost = convert_currency(%s WHERE id = %s",, currency_code, TARGET_CURRENCY, charge_start_datetime)
                 (cost_info["total"], tm_id),
             )
             log.info(
@@ -394,6 +395,65 @@ def log_summary(stats: dict, dry_run: bool) -> None:
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
+
+
+# --- Currency conversion with ECB historical rates ---
+_rates_cache = {}
+
+def get_latest_rate(currency: str):
+    key = ("latest", currency)
+    if key in _rates_cache:
+        return _rates_cache[key]
+
+    url = "https://api.exchangerate.host/latest"
+    params = {"base": "EUR", "symbols": currency}
+
+    r = requests.get(url, params=params, timeout=5)
+    r.raise_for_status()
+    rate = r.json()["rates"][currency]
+    _rates_cache[key] = rate
+    return rate
+
+
+def get_rate(date, currency: str):
+    key = (date.strftime("%Y-%m-%d"), currency)
+
+    if key in _rates_cache:
+        return _rates_cache[key]
+
+    url = f"https://api.exchangerate.host/{key[0]}"
+    params = {"base": "EUR", "symbols": currency}
+
+    try:
+        r = requests.get(url, params=params, timeout=5)
+        r.raise_for_status()
+        data = r.json()
+        rate = data["rates"].get(currency)
+
+        if not rate:
+            raise Exception("Missing rate")
+
+        _rates_cache[key] = rate
+        return rate
+
+    except Exception as e:
+        print(f"[WARN] ECB failed, fallback to latest: {e}")
+        return get_latest_rate(currency)
+
+
+def convert_currency(amount, from_currency, to_currency, date):
+    if from_currency == to_currency:
+        return amount
+
+    if from_currency != "EUR":
+        rate_from = get_rate(date, from_currency)
+        amount = amount / rate_from
+
+    if to_currency != "EUR":
+        rate_to = get_rate(date, to_currency)
+        amount = amount * rate_to
+
+    return amount
 
 def main() -> None:
     global LOOKBACK_DAYS
