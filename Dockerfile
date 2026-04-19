@@ -16,4 +16,4 @@ COPY importer.py .
 # Persistent volumes for token cache and logs
 VOLUME ["/data", "/logs"]
 
-CMD ["python", "importer.py"]
+ENTRYPOINT ["python", "importer.py"]
