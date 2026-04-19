@@ -4,6 +4,9 @@ teslamate-supercharger-costs
 ============================
 Fetches real Supercharger session costs from the Tesla ownership API
 and writes them into TeslaMate's PostgreSQL database automatically.
+
+Configuration is done via environment variables or a .env file.
+See .env.example for all available options.
 """
 
 import os
@@ -12,7 +15,7 @@ import json
 import logging
 import requests
 import argparse
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 try:
@@ -24,10 +27,12 @@ except ImportError as e:
     print("Install with: pip install -r requirements.txt")
     sys.exit(1)
 
+
 # ── Logging ──────────────────────────────────────────────────────────────────
 
-def setup_logging(log_file: str, verbose: bool = False) -> logging.Logger:
-    handlers = [logging.StreamHandler(sys.stdout)]
+def setup_logging(log_file: str) -> logging.Logger:
+    handlers: list[logging.Handler] = [logging.StreamHandler(sys.stdout)]
+
     if log_file:
         try:
             Path(log_file).parent.mkdir(parents=True, exist_ok=True)
@@ -35,14 +40,14 @@ def setup_logging(log_file: str, verbose: bool = False) -> logging.Logger:
         except OSError as e:
             print(f"WARNING: Cannot create log file {log_file}: {e}")
 
-    level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(
-        level=level,
+        level=logging.INFO,
         format="%(asctime)s  %(levelname)-8s  %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
         handlers=handlers,
     )
     return logging.getLogger("teslamate_suc")
+
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
@@ -52,6 +57,7 @@ def _cfg(key: str, default: str | None = None, required: bool = False) -> str | 
         print(f"ERROR: Required environment variable not set: {key}")
         sys.exit(1)
     return val
+
 
 TESLA_EMAIL        = _cfg("TESLA_EMAIL",        required=True)
 TESLA_CACHE_FILE   = _cfg("TESLA_CACHE_FILE",   "/data/tesla_cache.json")
@@ -70,23 +76,15 @@ TARGET_CURRENCY    = _cfg("TARGET_CURRENCY",    "EUR")
 
 log = setup_logging(LOG_FILE)
 
+
 # ── Tesla API ─────────────────────────────────────────────────────────────────
 
 OWNERSHIP_API_URL = "https://ownership.tesla.com/mobile-app/charging/history"
 
-def fetch_charging_sessions(input_file: str | None = None) -> list[dict]:
-    if input_file:
-        log.info(f"Loading sessions from local file: {input_file}")
-        try:
-            with open(input_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            # Handle both direct list or { "data": [...] } format
-            return data if isinstance(data, list) else data.get("data", [])
-        except (FileNotFoundError, json.JSONDecodeError) as e:
-            log.error(f"Failed to load input file: {e}")
-            sys.exit(1)
 
+def fetch_charging_sessions() -> list[dict]:
     log.info(f"Connecting to Tesla API as {TESLA_EMAIL}")
+
     cache_path = Path(TESLA_CACHE_FILE)
     cache_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -96,40 +94,27 @@ def fetch_charging_sessions(input_file: str | None = None) -> list[dict]:
             tesla.refresh_token(refresh_token=refresh_token)
 
         vehicles = tesla.vehicle_list()
-        if not vehicles:
-            log.error("No vehicles found for this Tesla account.")
-            sys.exit(1)
-            
-        target_vin = _cfg("TESLA_VIN") or vehicles[0]["vin"]
-        log.info(f"Using vehicle VIN: {target_vin}")
+        vehicle = vehicles[0]
+        vin = vehicle["vin"]
 
-        # teslapy.get() returns a requests.Response object
+        target_vin = _cfg("TESLA_VIN") or vin
+
         response = tesla.get(OWNERSHIP_API_URL, params={
             "vin": target_vin,
             "deviceLanguage": "en",
             "deviceCountry": "US",
             "operationName": "getChargingHistoryV2",
         })
-        response.raise_for_status()
-        
-        sessions = response.json().get("data") or []
+
+        sessions = response.get("data") or []
         log.info(f"Retrieved {len(sessions)} sessions from Tesla API")
         return sessions
 
+
 def _interactive_auth(tesla: teslapy.Tesla) -> str:
-    print("\n=== Tesla OAuth Authentication ===")
-    print("Please paste your refresh_token (or the full redirect URL).")
-    print("If you pasted a URL, the token will be extracted automatically.\n")
-    value = input("Token/URL: ").strip()
-    
-    # Extract token if user pasted a redirect URL
-    if "refresh_token=" in value:
-        value = value.split("refresh_token=")[1].split("&")[0]
-    elif "code=" in value:
-        print("ERROR: You pasted an authorization CODE. Please refresh your token or use tesla-info.com to get a REFRESH_TOKEN.")
-        sys.exit(1)
-        
+    value = input("Paste refresh_token: ").strip()
     return value
+
 
 # ── Cost extraction ───────────────────────────────────────────────────────────
 
@@ -147,54 +132,46 @@ def extract_cost(session: dict) -> dict | None:
         "currency": fees[0].get("currencyCode") or "?"
     }
 
+
 # ── DB ────────────────────────────────────────────────────────────────────────
 
 def _get_db_connection():
-    try:
-        return psycopg2.connect(
-            host=DB_HOST,
-            port=int(DB_PORT),
-            dbname=DB_NAME,
-            user=DB_USER,
-            password=DB_PASS,
-        )
-    except psycopg2.OperationalError as e:
-        log.error(f"Database connection failed: {e}")
-        sys.exit(1)
+    return psycopg2.connect(
+        host=DB_HOST,
+        port=int(DB_PORT),
+        dbname=DB_NAME,
+        user=DB_USER,
+        password=DB_PASS,
+    )
+
 
 # ── FX ────────────────────────────────────────────────────────────────────────
 
 _rates_cache = {}
 
-def get_rate(date: datetime, currency: str) -> float:
+def get_rate(date, currency):
     key = (date.strftime("%Y-%m-%d"), currency)
+
     if key in _rates_cache:
         return _rates_cache[key]
 
     url = f"https://api.frankfurter.app/{key[0]}"
     params = {"from": "EUR", "to": currency}
-    
-    try:
-        r = requests.get(url, params=params, timeout=5)
-        r.raise_for_status()
-        data = r.json()
-        
-        if "rates" not in data or currency not in data["rates"]:
-            # Fallback to latest rate if historical is missing
-            log.warning(f"Historical rate missing for {currency} on {key[0]}, using latest.")
-            r2 = requests.get("https://api.frankfurter.app/latest", params={"to": currency}, timeout=5)
-            r2.raise_for_status()
-            rate = r2.json()["rates"][currency]
-        else:
-            rate = data["rates"][currency]
-            
-        _rates_cache[key] = rate
-        return rate
-    except requests.RequestException as e:
-        log.error(f"FX rate fetch failed for {currency} on {key[0]}: {e}")
-        raise
 
-def convert_currency(amount: float, from_currency: str, to_currency: str, date: datetime) -> float:
+    r = requests.get(url, params=params, timeout=5)
+    r.raise_for_status()
+
+    data = r.json()
+
+    if "rates" not in data or currency not in data["rates"]:
+        raise Exception(f"FX rate not found for {currency} on {key[0]}")
+
+    rate = data["rates"][currency]
+    _rates_cache[key] = rate
+    return rate
+
+
+def convert_currency(amount, from_currency, to_currency, date):
     if from_currency == to_currency:
         return round(amount, 2)
 
@@ -208,36 +185,24 @@ def convert_currency(amount: float, from_currency: str, to_currency: str, date: 
 
     return round(amount, 2)
 
+
 # ── MAIN ──────────────────────────────────────────────────────────────────────
 
-def import_to_teslamate(sessions, dry_run, verbose):
+def import_to_teslamate(sessions, dry_run):
     conn = _get_db_connection()
     cur = conn.cursor()
-    updated_count = 0
-    skipped_count = 0
-
-    print("\n" + "="*60)
-    print(f"{'DRY-RUN' if dry_run else 'IMPORT'} MODE")
-    print(f"DB: {DB_USER}@{DB_HOST}:{DB_PORT}/{DB_NAME}")
-    print(f"Lookback: {LOOKBACK_DAYS} days | Tolerance: {TIME_TOLERANCE_S}s")
-    print(f"Target Currency: {TARGET_CURRENCY}")
-    print("="*60)
 
     for session in sessions:
         start = session.get("chargeStartDateTime")
         if not start:
             continue
 
-        # Tesla API returns UTC ISO8601. TeslaMate expects naive UTC TIMESTAMP.
-        start_dt = dateparser.parse(start).astimezone(timezone.utc).replace(tzinfo=None)
+        start_dt = dateparser.parse(start).astimezone(timezone.utc)
 
         cost_info = extract_cost(session)
         if not cost_info:
-            if verbose:
-                log.debug(f"SKIPPED (no fees): {start}")
             continue
 
-        # Safe query for TeslaMate's TIMESTAMP column
         cur.execute("""
             SELECT id, start_date, cost
             FROM charging_processes
@@ -247,75 +212,48 @@ def import_to_teslamate(sessions, dry_run, verbose):
 
         row = cur.fetchone()
         if not row:
-            if verbose:
-                log.debug(f"NOT FOUND: {start}")
             continue
 
         tm_id, tm_start, tm_cost = row
 
         if tm_cost and not OVERWRITE_EXISTING:
-            skipped_count += 1
             continue
 
         currency_code = cost_info["currency"]
-        try:
-            converted = convert_currency(
-                cost_info["total"],
-                currency_code,
-                TARGET_CURRENCY,
-                start_dt
-            )
-        except Exception as e:
-            log.error(f"Currency conversion failed for session {tm_id}: {e}")
+
+        converted = convert_currency(
+            cost_info["total"],
+            currency_code,
+            TARGET_CURRENCY,
+            start_dt
+        )
+
+        if dry_run:
+            log.info(f"{cost_info['total']} {currency_code} -> {converted} {TARGET_CURRENCY}")
             continue
 
-        # Extract kWh for logging
-        charge_kwh = session.get("chargeEnergyAdded") or session.get("chargeMilesAdded") or "N/A"
-        
-        if dry_run:
-            print(f"  {converted} {TARGET_CURRENCY} [{charge_kwh} kWh] (from {cost_info['total']} {currency_code})")
-        else:
-            try:
-                cur.execute(
-                    "UPDATE charging_processes SET cost = %s WHERE id = %s",
-                    (converted, tm_id),
-                )
-                updated_count += 1
-                log.info(f"UPDATED {tm_id}: {converted} {TARGET_CURRENCY}")
-            except psycopg2.Error as e:
-                log.error(f"DB update failed for {tm_id}: {e}")
-                conn.rollback()
-                raise
+        cur.execute(
+            "UPDATE charging_processes SET cost = %s WHERE id = %s",
+            (converted, tm_id),
+        )
 
-    if not dry_run and updated_count > 0:
-        try:
-            conn.commit()
-            log.info("Changes committed successfully.")
-        except psycopg2.Error as e:
-            log.error(f"Commit failed, rolling back: {e}")
-            conn.rollback()
+        log.info(f"UPDATED {tm_id}: {converted} {TARGET_CURRENCY}")
+
+    if not dry_run:
+        conn.commit()
 
     cur.close()
     conn.close()
 
-    print("\n" + "-"*60)
-    print(f"SUMMARY: Updated {updated_count} | Skipped {skipped_count} | Total processed {len(sessions)}")
-    print("-"*60 + "\n")
 
 def main():
-    parser = argparse.ArgumentParser(description="TeslaMate Supercharger Cost Importer")
-    parser.add_argument("--dry-run", action="store_true", help="Preview changes without writing to the database")
-    parser.add_argument("-i", "--input", type=str, help="Load sessions from a saved JSON file (for testing)")
-    parser.add_argument("-v", "--verbose", action="store_true", help="Show debug output (skipped/free sessions)")
-    parser.add_argument("--lookback", type=int, help="Override LOOKBACK_DAYS for this run")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
-    global LOOKBACK_DAYS
-    if args.lookback:
-        LOOKBACK_DAYS = args.lookback
+    sessions = fetch_charging_sessions()
+    import_to_teslamate(sessions, args.dry_run)
 
-    sessions = fetch_charging_sessions(args.input)
-    import_to_teslamate(sessions, args.dry_run, args.verbose)
 
 if __name__ == "__main__":
     main()
