@@ -58,11 +58,32 @@ cp .env.example .env
 nano .env   # or your preferred editor
 ```
 
-The **minimum required** settings:
+And at the end of the file (before networks:) insert:
 
 ```dotenv
-TESLA_EMAIL=your@email.com
-TESLAMATE_DB_PASS=your_teslamate_db_password
+ suc-importer:
+    build: ./teslamate-supercharger-costs
+    container_name: teslamate-suc-importer
+    restart: "no"
+    depends_on:
+      - database
+    environment:
+      TESLA_EMAIL: email@email.cz
+      TESLA_CACHE_FILE: /data/tesla_cache.json
+      TESLAMATE_DB_HOST: database
+      TESLAMATE_DB_PORT: 5432
+      TESLAMATE_DB_NAME: teslamate
+      TESLAMATE_DB_USER: teslamate
+      TESLAMATE_DB_PASS: password
+      LOOKBACK_DAYS: 30
+      TIME_TOLERANCE_S: 600
+      OVERWRITE_EXISTING: "false"
+      LOG_FILE: /logs/importer.log
+    volumes:
+      - ./teslamate-supercharger-costs/data:/data
+      - ./teslamate-supercharger-costs/logs:/logs
+    networks:
+      - default
 ```
 
 Find your DB password in your TeslaMate `docker-compose.yml` under the `database` service (`POSTGRES_PASSWORD`).
