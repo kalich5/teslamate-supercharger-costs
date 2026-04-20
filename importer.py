@@ -72,7 +72,7 @@ DB_NAME            = _cfg("TESLAMATE_DB_NAME",  "teslamate")
 DB_USER            = _cfg("TESLAMATE_DB_USER",  "teslamate")
 DB_PASS            = _cfg("TESLAMATE_DB_PASS",  required=True)
 
-LOOKBACK_DAYS      = int(_cfg("LOOKBACK_DAYS",      "30"))
+LOOKBACK_DAYS      = int(_cfg("LOOKBACK_DAYS",      "9999"))
 TIME_TOLERANCE_S   = int(_cfg("TIME_TOLERANCE_S",   "120"))
 OVERWRITE_EXISTING = _cfg("OVERWRITE_EXISTING", "false").lower() == "true"
 LOG_FILE           = _cfg("LOG_FILE",           "/logs/importer.log")
