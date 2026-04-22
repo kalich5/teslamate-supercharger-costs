@@ -75,6 +75,7 @@ And at the end of the file (before networks:) insert:
       TESLAMATE_DB_NAME: teslamate
       TESLAMATE_DB_USER: teslamate
       TESLAMATE_DB_PASS: password
+      TARGET_CURRENCY: CZK/EUR/CHF/USD (enter only one value here)
       LOOKBACK_DAYS: 30
       TIME_TOLERANCE_S: 600
       OVERWRITE_EXISTING: "false"
