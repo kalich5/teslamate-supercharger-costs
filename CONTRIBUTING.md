@@ -2,6 +2,8 @@
 
 Thanks for taking the time to contribute! 🎉
 
+Bug fixes and code improvements - https://github.com/999happyvolts
+
 ## Ways to help
 
 - **Report a bug** — open an [Issue](../../issues) with steps to reproduce
