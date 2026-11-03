@@ -7,8 +7,9 @@
 #
 #  HOW TO USE:
 #  1. Copy .env.example → .env and fill in your values
-#  2. Run once interactively to authorise the Tesla token:
-#       docker compose run --rm importer
+#  2. One-time Tesla Fleet API setup (see README):
+#       docker compose run --rm importer --register-domain your-domain
+#       docker compose run --rm importer --auth
 #  3. Set up a cron job to call: docker compose run --rm importer
 # ══════════════════════════════════════════════════════════════
 

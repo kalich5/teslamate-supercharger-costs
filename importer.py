@@ -2,8 +2,9 @@
 """
 teslamate-supercharger-costs
 ============================
-Fetches real Supercharger session costs from the Tesla ownership API
-and writes them into TeslaMate's PostgreSQL database automatically.
+Fetches real Supercharger session costs from Tesla (official Fleet API,
+or the legacy ownership API) and writes them into TeslaMate's PostgreSQL
+database automatically.
 
 Optionally converts all costs to a target currency using live exchange
 rates from the European Central Bank (no API key required).
@@ -24,13 +25,18 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 try:
-    import teslapy
     import psycopg2
+    import requests
     from dateutil import parser as dateparser
 except ImportError as e:
     print(f"ERROR: Missing dependency: {e}")
     print("Install with: pip install -r requirements.txt")
     sys.exit(1)
+
+try:
+    import teslapy  # only needed for the legacy ownership API mode
+except ImportError:
+    teslapy = None
 
 
 # ── Logging ──────────────────────────────────────────────────────────────────
@@ -69,9 +75,31 @@ def _cfg(key: str, default: str | None = None, required: bool = False) -> str | 
     return val
 
 
-TESLA_EMAIL        = _cfg("TESLA_EMAIL",        required=True)
+# Which Tesla API to use:
+#   fleet     — official Tesla Fleet API (recommended, needs a developer app)
+#   ownership — legacy unofficial endpoint used by the mobile app
+# Defaults to "fleet" when TESLA_CLIENT_ID is set, otherwise "ownership".
+TESLA_API_MODE     = (_cfg("TESLA_API_MODE") or
+                      ("fleet" if os.getenv("TESLA_CLIENT_ID") else "ownership")).lower().strip()
+if TESLA_API_MODE not in ("fleet", "ownership"):
+    print(f"ERROR: TESLA_API_MODE must be 'fleet' or 'ownership', got '{TESLA_API_MODE}'")
+    sys.exit(1)
+
+TESLA_EMAIL        = _cfg("TESLA_EMAIL",        required=(TESLA_API_MODE == "ownership"))
 TESLA_CACHE_FILE   = _cfg("TESLA_CACHE_FILE",   "/data/tesla_cache.json")
-TESLA_VIN          = _cfg("TESLA_VIN")  # FIX: read at module level so it's always available
+
+# Optional: limit the import to specific vehicles (comma-separated VINs).
+# Empty = all vehicles on the account.
+TESLA_VIN          = _cfg("TESLA_VIN") or ""
+TESLA_VINS         = [v.strip().upper() for v in TESLA_VIN.split(",") if v.strip()]
+
+# Fleet API settings (TESLA_API_MODE=fleet)
+TESLA_CLIENT_ID        = _cfg("TESLA_CLIENT_ID")
+TESLA_CLIENT_SECRET    = _cfg("TESLA_CLIENT_SECRET")
+TESLA_REDIRECT_URI     = _cfg("TESLA_REDIRECT_URI", "https://localhost/callback")
+TESLA_FLEET_REGION     = (_cfg("TESLA_FLEET_REGION", "eu") or "eu").lower().strip()
+TESLA_FLEET_API_URL    = _cfg("TESLA_FLEET_API_URL")  # optional override of the regional URL
+TESLA_FLEET_TOKEN_FILE = _cfg("TESLA_FLEET_TOKEN_FILE", "/data/fleet_token.json")
 
 DB_HOST            = _cfg("TESLAMATE_DB_HOST",  "database")
 DB_PORT            = _cfg("TESLAMATE_DB_PORT",  "5432")
@@ -179,29 +207,377 @@ def convert_currency(amount: float, from_currency: str) -> tuple[float, str]:
     return round(converted, 4), TARGET_CURRENCY
 
 
-# ── Tesla API ─────────────────────────────────────────────────────────────────
+# ── Tesla API (shared helpers) ────────────────────────────────────────────────
+
+PAGE_SIZE = 25  # Tesla charging history maximum per page
+
+
+def _select_vehicles(vehicles: list[dict]) -> list[dict]:
+    """
+    Pick the vehicles to import. With TESLA_VIN set, only those VINs
+    (comma-separated) are used; otherwise every vehicle on the account.
+    """
+    if not vehicles:
+        log.error("No vehicles found in your Tesla account.")
+        sys.exit(1)
+
+    available = [v.get("vin") for v in vehicles]
+    if not TESLA_VINS:
+        selected = vehicles
+    else:
+        missing = [vin for vin in TESLA_VINS if vin not in available]
+        if missing:
+            log.error(f"VIN(s) {missing} not found in your Tesla account. Available VINs: {available}")
+            sys.exit(1)
+        selected = [v for v in vehicles if v.get("vin") in TESLA_VINS]
+
+    for v in selected:
+        log.info(f"Vehicle: {v.get('display_name') or 'N/A'} (VIN: {v.get('vin')})")
+    if len(vehicles) > 1 and not TESLA_VINS:
+        log.info(f"  {len(vehicles)} vehicles found, importing all of them. "
+                 f"Set TESLA_VIN to limit the import (comma-separated).")
+    return selected
+
+
+def _extract_page_sessions(response, page: int) -> list[dict]:
+    """Normalise the varying response structures across API versions."""
+    if isinstance(response, list):
+        return response
+    if not isinstance(response, dict):
+        return []
+
+    inner = response.get("response")
+    if isinstance(inner, dict):  # Fleet API sometimes wraps: {"response": {"data": [...]}}
+        response = inner
+
+    sessions = (
+        response.get("data") or
+        (inner if isinstance(inner, list) else None) or
+        response.get("charging_history") or
+        []
+    )
+    if not sessions and response:
+        log.debug(f"  Page {page}: response had unexpected structure. "
+                  f"Top-level keys: {list(response.keys())}")
+    return sessions
+
+
+def _paginate_history(fetch_page, cutoff: datetime) -> list[dict]:
+    """
+    Call fetch_page(page_no) until all sessions back to `cutoff` are collected.
+    Sessions are returned newest-first, PAGE_SIZE per page.
+    """
+    all_sessions: list[dict] = []
+    page = 1
+    last_page_first_session: str | None = None
+
+    while True:
+        try:
+            response = fetch_page(page)
+        except Exception as e:
+            log.error(f"Tesla API request failed (page {page}): {e}")
+            break
+
+        page_sessions = _extract_page_sessions(response, page)
+        if not page_sessions:
+            log.debug(f"  Page {page}: empty -- stopping pagination")
+            break
+
+        # Some API versions return the last real page over and over instead of
+        # an empty page — stop when a page repeats to avoid an endless loop.
+        first_session_ts = page_sessions[0].get("chargeStartDateTime")
+        if first_session_ts and first_session_ts == last_page_first_session:
+            log.debug(f"  Page {page}: identical to previous page — stopping pagination")
+            break
+        last_page_first_session = first_session_ts
+
+        log.debug(f"  Page {page}: {len(page_sessions)} sessions")
+        all_sessions.extend(page_sessions)
+
+        oldest_str = page_sessions[-1].get("chargeStartDateTime", "")
+        if oldest_str:
+            try:
+                if dateparser.parse(oldest_str).astimezone(timezone.utc) < cutoff:
+                    log.debug(f"  Page {page}: reached lookback cutoff -- stopping")
+                    break
+            except Exception:
+                pass
+
+        if len(page_sessions) < PAGE_SIZE:
+            log.debug(f"  Page {page}: last page ({len(page_sessions)} results)")
+            break
+
+        page += 1
+
+    log.info(f"  Retrieved {len(all_sessions)} sessions ({page} page(s) fetched)")
+    return all_sessions
+
+
+def fetch_charging_sessions(lookback_days: int) -> list[dict]:
+    """Return charging sessions for all selected vehicles, using the configured API."""
+    cutoff = datetime.now(timezone.utc) - timedelta(days=lookback_days)
+    if TESLA_API_MODE == "fleet":
+        return _fetch_fleet(cutoff, lookback_days)
+    return _fetch_ownership(cutoff, lookback_days)
+
+
+# ── Tesla Fleet API (official) ────────────────────────────────────────────────
+
+FLEET_API_URLS = {
+    "na": "https://fleet-api.prd.na.vn.cloud.tesla.com",
+    "eu": "https://fleet-api.prd.eu.vn.cloud.tesla.com",
+    "cn": "https://fleet-api.prd.cn.vn.cloud.tesla.cn",
+}
+FLEET_AUTH_URL  = "https://auth.tesla.com/oauth2/v3/authorize"
+FLEET_TOKEN_URL = _cfg("TESLA_FLEET_TOKEN_URL", "https://fleet-auth.prd.vn.cloud.tesla.com/oauth2/v3/token")
+FLEET_SCOPES    = "openid offline_access vehicle_device_data vehicle_charging_cmds"
+
+
+class FleetApiError(Exception):
+    pass
+
+
+class FleetClient:
+    """
+    Minimal Tesla Fleet API client: OAuth token handling + GET requests.
+
+    Tesla rotates refresh tokens — every refresh returns a new one that must
+    be saved, otherwise the next run cannot log in. The token file is
+    therefore rewritten after each refresh.
+    """
+
+    def __init__(self) -> None:
+        if not TESLA_CLIENT_ID:
+            log.error("TESLA_CLIENT_ID is required for TESLA_API_MODE=fleet.")
+            sys.exit(1)
+        self.base_url = (TESLA_FLEET_API_URL or FLEET_API_URLS.get(TESLA_FLEET_REGION, "")).rstrip("/")
+        if not self.base_url:
+            log.error(f"Unknown TESLA_FLEET_REGION '{TESLA_FLEET_REGION}'. Use one of: {list(FLEET_API_URLS)}")
+            sys.exit(1)
+        self.token_path = Path(TESLA_FLEET_TOKEN_FILE)
+        self.http = requests.Session()
+        self.token: dict = self._load_token()
+
+    # -- token storage --------------------------------------------------------
+
+    def _load_token(self) -> dict:
+        try:
+            return json.loads(self.token_path.read_text())
+        except FileNotFoundError:
+            return {}
+        except Exception as e:
+            log.warning(f"Cannot read token file {self.token_path}: {e}")
+            return {}
+
+    def _save_token(self, data: dict) -> None:
+        token = dict(self.token)
+        token.update({k: v for k, v in data.items() if v})
+        if "expires_in" in data:
+            token["expires_at"] = int(time.time()) + int(data["expires_in"])
+        self.token = token
+        self.token_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.token_path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(token, indent=2))
+        os.chmod(tmp, 0o600)
+        tmp.replace(self.token_path)
+
+    def _token_request(self, data: dict) -> dict:
+        try:
+            r = self.http.post(FLEET_TOKEN_URL, data=data, timeout=TESLA_API_TIMEOUT)
+        except requests.RequestException as e:
+            raise FleetApiError(f"Token request failed: {e}") from e
+        if r.status_code != 200:
+            raise FleetApiError(f"Token request failed: HTTP {r.status_code} {r.text[:300]}")
+        return r.json()
+
+    # -- authentication -------------------------------------------------------
+
+    def refresh(self) -> None:
+        if not self.token.get("refresh_token"):
+            raise FleetApiError("No refresh token stored.")
+        log.debug("Refreshing Fleet API access token")
+        self._save_token(self._token_request({
+            "grant_type":    "refresh_token",
+            "client_id":     TESLA_CLIENT_ID,
+            "refresh_token": self.token["refresh_token"],
+        }))
+
+    def ensure_token(self) -> None:
+        if not self.token.get("refresh_token"):
+            log.info("No Fleet API token found — starting interactive authorisation")
+            log.info("This only happens ONCE. The token is saved afterwards.")
+            self.interactive_auth()
+        if not self.token.get("access_token") or self.token.get("expires_at", 0) - 60 < time.time():
+            self.refresh()
+
+    def authorize_url(self) -> str:
+        from urllib.parse import urlencode
+        return FLEET_AUTH_URL + "?" + urlencode({
+            "response_type":         "code",
+            "client_id":             TESLA_CLIENT_ID,
+            "redirect_uri":          TESLA_REDIRECT_URI,
+            "scope":                 FLEET_SCOPES,
+            "state":                 "teslamate-suc",
+            "prompt_missing_scopes": "true",
+        })
+
+    def interactive_auth(self) -> None:
+        if not sys.stdin.isatty():
+            log.error("Fleet API authorisation needed, but no terminal is attached (cron?).")
+            log.error("Run once interactively:  docker compose run --rm importer --auth")
+            sys.exit(1)
+
+        print()
+        print("=" * 65)
+        print("  FIRST RUN - Tesla Fleet API authorisation required")
+        print("=" * 65)
+        print()
+        print("  1. Open this URL in your browser and log in with your Tesla account:")
+        print()
+        print(f"     {self.authorize_url()}")
+        print()
+        print("  2. Approve access. You are redirected to your TESLA_REDIRECT_URI.")
+        print("     The page itself may show an error — that is fine.")
+        print("  3. Copy the FULL URL from the address bar (it contains ?code=...)")
+        print()
+        print("  Alternatively paste an existing Fleet API refresh_token.")
+        print()
+        value = input("  Paste callback URL or refresh_token: ").strip()
+        if not value:
+            log.error("Nothing entered — aborting.")
+            sys.exit(1)
+
+        if value.startswith("http"):
+            from urllib.parse import urlparse, parse_qs
+            qs = parse_qs(urlparse(value).query)
+            if "error" in qs:
+                raise FleetApiError(f"Authorisation failed: {qs.get('error_description', qs['error'])[0]}")
+            code = (qs.get("code") or [None])[0]
+            if not code:
+                raise FleetApiError("No ?code= parameter found in the pasted URL.")
+            if not TESLA_CLIENT_SECRET:
+                raise FleetApiError("TESLA_CLIENT_SECRET is required to exchange the authorisation code.")
+            self._save_token(self._token_request({
+                "grant_type":    "authorization_code",
+                "client_id":     TESLA_CLIENT_ID,
+                "client_secret": TESLA_CLIENT_SECRET,
+                "code":          code,
+                "audience":      self.base_url,
+                "redirect_uri":  TESLA_REDIRECT_URI,
+            }))
+            log.info(f"Fleet API token obtained and saved to {self.token_path}")
+        else:
+            self._save_token({"refresh_token": value})
+            self.refresh()
+            log.info(f"Fleet API refresh token validated and saved to {self.token_path}")
+
+    def register_partner(self, domain: str) -> dict:
+        """One-time registration of the developer app in the region (POST /api/1/partner_accounts)."""
+        if not TESLA_CLIENT_SECRET:
+            raise FleetApiError("TESLA_CLIENT_SECRET is required for partner registration.")
+        partner = self._token_request({
+            "grant_type":    "client_credentials",
+            "client_id":     TESLA_CLIENT_ID,
+            "client_secret": TESLA_CLIENT_SECRET,
+            "scope":         FLEET_SCOPES,
+            "audience":      self.base_url,
+        })
+        r = self.http.post(
+            f"{self.base_url}/api/1/partner_accounts",
+            json={"domain": domain},
+            headers={"Authorization": f"Bearer {partner['access_token']}"},
+            timeout=TESLA_API_TIMEOUT,
+        )
+        if r.status_code != 200:
+            raise FleetApiError(f"Partner registration failed: HTTP {r.status_code} {r.text[:500]}")
+        return r.json()
+
+    # -- requests -------------------------------------------------------------
+
+    def get(self, path: str, params: dict | None = None):
+        self.ensure_token()
+        for attempt in (1, 2):
+            r = self.http.get(
+                f"{self.base_url}{path}",
+                params=params,
+                headers={"Authorization": f"Bearer {self.token['access_token']}"},
+                timeout=TESLA_API_TIMEOUT,
+            )
+            if r.status_code == 401 and attempt == 1:
+                self.refresh()  # token revoked/expired early — refresh once and retry
+                continue
+            break
+
+        if r.status_code == 200:
+            return r.json()
+
+        hints = {
+            401: "Token rejected. Delete the token file and run with --auth again.",
+            403: "Missing scope. Make sure 'vehicle_charging_cmds' is enabled for your app "
+                 "and was granted during login (re-run with --auth).",
+            412: "App not registered in this region. Run once with --register-domain <your-domain>.",
+            421: "Wrong region for this account. Change TESLA_FLEET_REGION (eu / na).",
+            429: "Rate limited by Tesla. Try again later.",
+            402: "Payment required — check billing in the Tesla developer dashboard.",
+        }
+        hint = hints.get(r.status_code, "")
+        raise FleetApiError(f"GET {path}: HTTP {r.status_code} {r.text[:300]} {hint}".strip())
+
+
+def _fetch_fleet(cutoff: datetime, lookback_days: int) -> list[dict]:
+    client = FleetClient()
+    log.info(f"Connecting to Tesla Fleet API ({client.base_url})")
+    try:
+        vehicles_resp = client.get("/api/1/vehicles")
+    except FleetApiError as e:
+        log.error(str(e))
+        sys.exit(1)
+
+    vehicles = (vehicles_resp.get("response") or []) if isinstance(vehicles_resp, dict) else []
+    selected = _select_vehicles(vehicles)
+
+    log.info(f"Fetching charging history for the last {lookback_days} days (since {cutoff:%Y-%m-%d})...")
+    all_sessions: list[dict] = []
+    for vehicle in selected:
+        vin = vehicle["vin"]
+        params = {"vin": vin, "pageSize": PAGE_SIZE}
+        # Server-side date filter keeps nightly runs to a single request.
+        if lookback_days < 3650:
+            params["startTime"] = cutoff.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        log.info(f"  VIN {vin}:")
+        sessions = _paginate_history(
+            lambda page: client.get("/api/1/dx/charging/history", {**params, "pageNo": page}),
+            cutoff,
+        )
+        for s in sessions:
+            s.setdefault("vin", vin)
+        all_sessions.extend(sessions)
+    return all_sessions
+
+
+# ── Tesla ownership API (legacy, unofficial) ──────────────────────────────────
 
 OWNERSHIP_API_URL = "https://ownership.tesla.com/mobile-app/charging/history"
 
 
-def fetch_charging_sessions(lookback_days: int) -> list[dict]:
+def _fetch_ownership(cutoff: datetime, lookback_days: int) -> list[dict]:
     """
-    Authenticate with the Tesla ownership API and return all charging
-    sessions within the lookback_days window.
+    Legacy mode: the unofficial endpoint used by the Tesla mobile app.
+    Tesla appears to have stopped supporting it — prefer TESLA_API_MODE=fleet.
+    """
+    if teslapy is None:
+        log.error("teslapy is not installed — required for TESLA_API_MODE=ownership.")
+        sys.exit(1)
 
-    The Tesla API returns at most 25 sessions per page, so we paginate
-    through all pages until we either run out of results or reach sessions
-    older than lookback_days.
-    """
-    log.info(f"Connecting to Tesla API as {TESLA_EMAIL}")
+    log.info(f"Connecting to Tesla ownership API as {TESLA_EMAIL}")
+    log.warning("ownership.tesla.com appears to be no longer supported by Tesla. "
+                "Consider switching to TESLA_API_MODE=fleet (see README).")
 
     cache_path = Path(TESLA_CACHE_FILE)
     cache_path.parent.mkdir(parents=True, exist_ok=True)
 
-    cutoff = datetime.now(timezone.utc) - timedelta(days=lookback_days)
-
     with teslapy.Tesla(TESLA_EMAIL, cache_file=str(cache_path)) as tesla:
-        # FIX: set a timeout so the API call cannot hang forever
         tesla.timeout = TESLA_API_TIMEOUT
 
         if not tesla.authorized:
@@ -210,122 +586,32 @@ def fetch_charging_sessions(lookback_days: int) -> list[dict]:
             refresh_token = _interactive_auth(tesla)
             tesla.refresh_token(refresh_token=refresh_token)
 
-        vehicles = tesla.vehicle_list()
-        if not vehicles:
-            log.error("No vehicles found in your Tesla account.")
-            sys.exit(1)
+        selected = _select_vehicles(tesla.vehicle_list())
 
-        # FIX: honour TESLA_VIN to select the correct vehicle; validate it exists
-        target_vin = TESLA_VIN or vehicles[0]["vin"]
-        vehicle = next((v for v in vehicles if v["vin"] == target_vin), None)
-        if vehicle is None:
-            log.error(
-                f"VIN '{target_vin}' not found in your Tesla account. "
-                f"Available VINs: {[v['vin'] for v in vehicles]}"
-            )
-            sys.exit(1)
-
-        log.info(f"Vehicle: {vehicle.get('display_name', 'N/A')} (VIN: {target_vin})")
-
-        if len(vehicles) > 1 and not TESLA_VIN:
-            log.info(
-                f"  Note: {len(vehicles)} vehicles found. Using the first one. "
-                f"Set TESLA_VIN to select a specific vehicle."
-            )
-
-        log.info(
-            f"Fetching charging history for the last {lookback_days} days "
-            f"(since {cutoff:%Y-%m-%d})..."
-        )
-
+        log.info(f"Fetching charging history for the last {lookback_days} days (since {cutoff:%Y-%m-%d})...")
         all_sessions: list[dict] = []
-        page = 1
-        page_size = 25  # Tesla API maximum per page
-        last_page_first_session: str | None = None  # FIX: track to detect repeated pages
-
-        while True:
-            try:
-                # teslapy returns a JsonDict (already parsed) -- NOT a requests.Response.
-                # Do NOT call .raise_for_status() or .json() on the result.
-                response = tesla.get(OWNERSHIP_API_URL, params={
-                    "vin":            target_vin,
+        for vehicle in selected:
+            vin = vehicle["vin"]
+            log.info(f"  VIN {vin}:")
+            # teslapy returns a JsonDict (already parsed) -- NOT a requests.Response.
+            sessions = _paginate_history(
+                lambda page: tesla.get(OWNERSHIP_API_URL, params={
+                    "vin":            vin,
                     "deviceLanguage": "en",
                     "deviceCountry":  "US",
                     "operationName":  "getChargingHistoryV2",
                     "pageNo":         page,
-                    "pageSize":       page_size,
-                })
-            except Exception as e:
-                log.error(f"Tesla API request failed (page {page}): {e}")
-                break
-
-            # Normalise varying response structures across API versions
-            if isinstance(response, dict):
-                page_sessions = (
-                    response.get("data") or
-                    response.get("response") or
-                    response.get("charging_history") or
-                    []
-                )
-                # warn when none of the known keys matched so API changes are visible
-                if not page_sessions and response:
-                    log.debug(
-                        f"  Page {page}: response had unexpected structure. "
-                        f"Top-level keys: {list(response.keys())}"
-                    )
-            elif isinstance(response, list):
-                page_sessions = response
-            else:
-                page_sessions = []
-
-            if not page_sessions:
-                log.debug(f"  Page {page}: empty -- stopping pagination")
-                break
-
-            # FIX: detect repeated pages — some Tesla API versions return the last
-            # real page over and over instead of returning an empty page to signal
-            # the end, causing the loop to run forever and accumulate duplicates.
-            first_session_ts = page_sessions[0].get("chargeStartDateTime")
-            if first_session_ts and first_session_ts == last_page_first_session:
-                log.debug(f"  Page {page}: identical to previous page — stopping pagination")
-                break
-            last_page_first_session = first_session_ts
-
-            log.debug(f"  Page {page}: {len(page_sessions)} sessions")
-
-            # Sessions are returned newest-first; last item on the page is oldest.
-            # If oldest is beyond our cutoff, we can stop after adding this page.
-            oldest_str = page_sessions[-1].get("chargeStartDateTime", "")
-            reached_cutoff = False
-            if oldest_str:
-                try:
-                    oldest_dt = dateparser.parse(oldest_str).astimezone(timezone.utc)
-                    if oldest_dt < cutoff:
-                        reached_cutoff = True
-                except Exception:
-                    pass
-
-            all_sessions.extend(page_sessions)
-
-            if reached_cutoff:
-                log.debug(f"  Page {page}: reached lookback cutoff -- stopping")
-                break
-
-            # Fewer results than page_size means this was the last page
-            if len(page_sessions) < page_size:
-                log.debug(f"  Page {page}: last page ({len(page_sessions)} results)")
-                break
-
-            page += 1
-
-        log.info(
-            f"Retrieved {len(all_sessions)} sessions from Tesla API "
-            f"({page} page(s) fetched)"
-        )
+                    "pageSize":       PAGE_SIZE,
+                }),
+                cutoff,
+            )
+            for s in sessions:
+                s.setdefault("vin", vin)
+            all_sessions.extend(sessions)
         return all_sessions
 
 
-def _interactive_auth(tesla: teslapy.Tesla) -> str:
+def _interactive_auth(tesla: "teslapy.Tesla") -> str:
     """
     Guide the user through one-time OAuth authorisation.
     Returns a refresh_token string.
@@ -502,6 +788,17 @@ def _detect_start_date_timezone(cur) -> str:
         return "UTC"
 
 
+def _load_car_ids(cur) -> dict[str, int]:
+    """Return {VIN: car_id} from TeslaMate's cars table (empty on failure)."""
+    try:
+        cur.execute("SELECT id, vin FROM cars WHERE vin IS NOT NULL")
+        return {vin.upper(): car_id for car_id, vin in cur.fetchall()}
+    except Exception as e:
+        log.warning(f"  Cannot read cars table ({e}) — matching without VIN filter")
+        cur.connection.rollback()
+        return {}
+
+
 def import_to_teslamate(sessions: list[dict], dry_run: bool, lookback_days: int) -> dict:
     """
     Match each Tesla session against TeslaMate's charging_processes table
@@ -534,6 +831,10 @@ def import_to_teslamate(sessions: list[dict], dry_run: bool, lookback_days: int)
         # regardless of the DB server's timezone setting or column type.
         db_tz = _detect_start_date_timezone(cur)
 
+        # Map VIN -> TeslaMate car_id so that, with several cars on one account,
+        # a session is only matched against charging processes of the same car.
+        car_ids = _load_car_ids(cur)
+
         for session in sessions:
             start_str = session.get("chargeStartDateTime")
             if not start_str:
@@ -561,6 +862,11 @@ def import_to_teslamate(sessions: list[dict], dry_run: bool, lookback_days: int)
                 stats["no_cost"] += 1
                 continue
 
+            car_id = car_ids.get((session.get("vin") or "").upper())
+            if session.get("vin") and car_id is None and len(car_ids) > 1:
+                log.warning(f"  VIN {session['vin']} not found in TeslaMate cars table — "
+                            f"matching against all cars")
+
             # Find the closest matching record in TeslaMate.
             # start_date is cast using the detected timezone so that the
             # comparison against the Tesla API's UTC timestamp is always correct,
@@ -573,11 +879,12 @@ def import_to_teslamate(sessions: list[dict], dry_run: bool, lookback_days: int)
                     WHERE  ABS(EXTRACT(EPOCH FROM (
                                (start_date AT TIME ZONE %s) - %s::timestamptz
                            ))) < %s
+                      AND  (%s::int IS NULL OR car_id = %s::int)
                     ORDER BY ABS(EXTRACT(EPOCH FROM (
                                (start_date AT TIME ZONE %s) - %s::timestamptz
                            )))
                     LIMIT 1
-                """, (db_tz, start_dt, TIME_TOLERANCE_S, db_tz, start_dt))
+                """, (db_tz, start_dt, TIME_TOLERANCE_S, car_id, car_id, db_tz, start_dt))
             except Exception as e:
                 log.error(f"DB error during lookup: {e}")
                 conn.rollback()
@@ -687,6 +994,10 @@ Examples:
 
   # Historical import of the last 365 days
   python importer.py --lookback 365
+
+  # Fleet API one-time setup
+  python importer.py --register-domain your-name.github.io
+  python importer.py --auth
         """,
     )
     parser.add_argument("--dry-run", "-n", action="store_true",
@@ -697,6 +1008,11 @@ Examples:
                         help=f"How many days back to process (default: {lookback_days})")
     parser.add_argument("--verbose", "-v", action="store_true",
                         help="Show debug messages (skipped/free sessions)")
+    parser.add_argument("--auth", action="store_true",
+                        help="Fleet API: (re)run the one-time interactive login and exit")
+    parser.add_argument("--register-domain", metavar="DOMAIN",
+                        help="Fleet API: one-time registration of your app in the region "
+                             "(domain hosting the public key) and exit")
     args = parser.parse_args()
 
     if args.verbose:
@@ -705,8 +1021,27 @@ Examples:
     if args.lookback:
         lookback_days = args.lookback
 
+    if args.auth or args.register_domain:
+        if TESLA_API_MODE != "fleet":
+            log.error("--auth / --register-domain need TESLA_API_MODE=fleet (set TESLA_CLIENT_ID).")
+            sys.exit(1)
+        client = FleetClient()
+        try:
+            if args.register_domain:
+                result = client.register_partner(args.register_domain)
+                log.info(f"Partner registration OK ({client.base_url}): {json.dumps(result)}")
+            if args.auth:
+                client.interactive_auth()
+                client.ensure_token()
+                log.info("Fleet API login OK.")
+        except FleetApiError as e:
+            log.error(str(e))
+            sys.exit(1)
+        return
+
     log.info("=" * 55)
     log.info("  TeslaMate Supercharger Cost Importer")
+    log.info(f"  Tesla API: {TESLA_API_MODE}")
     log.info(f"  DB:        {DB_USER}@{DB_HOST}:{DB_PORT}/{DB_NAME}")
     log.info(f"  Lookback:  {lookback_days} days  |  Tolerance: {TIME_TOLERANCE_S}s")
     log.info(f"  Overwrite: {OVERWRITE_EXISTING}")

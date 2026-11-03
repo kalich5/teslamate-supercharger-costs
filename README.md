@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue?logo=python)](https://www.python.org)
 
-Automatically fetches **real Supercharger session costs** from the Tesla ownership API and writes them into your self-hosted [TeslaMate](https://github.com/teslamate-org/teslamate) instance — no manual entry, no fixed per-kWh estimates.
+Automatically fetches **real Supercharger session costs** from the official **Tesla Fleet API** and writes them into your self-hosted [TeslaMate](https://github.com/teslamate-org/teslamate) instance — no manual entry, no fixed per-kWh estimates.
 
 ---
 
@@ -30,7 +30,8 @@ Tesla API  ──►  importer.py  ──►  TeslaMate PostgreSQL
 - ✅ Safe by default — skips sessions that already have a cost
 - ✅ `--dry-run` mode — preview everything before writing
 - ✅ Runs as a lightweight Docker container via cron
-- ✅ Supports multiple vehicles via `TESLA_VIN`
+- ✅ Multiple vehicles — imports all cars on the account, each session matched to the TeslaMate car with the same VIN (limit with `TESLA_VIN`)
+- ✅ Official Tesla Fleet API — one nightly run costs ~1–2 API requests per car, far below Tesla's monthly free credit
 
 ---
 
@@ -38,6 +39,8 @@ Tesla API  ──►  importer.py  ──►  TeslaMate PostgreSQL
 
 - A running **TeslaMate** instance (Docker Compose)
 - A **Tesla account** with at least one vehicle
+- A free **Tesla developer app** at [developer.tesla.com](https://developer.tesla.com) (see [Fleet API setup](#4--tesla-fleet-api-setup-one-time))
+- A domain where you can host one public file (a free GitHub Pages site is enough)
 - Docker + Docker Compose on your server
 
 ---
@@ -68,15 +71,20 @@ And at the end of the file (before networks:) insert:
     depends_on:
       - database
     environment:
-      TESLA_EMAIL: email@email.cz
-      TESLA_CACHE_FILE: /data/tesla_cache.json
+      TESLA_API_MODE: fleet
+      TESLA_CLIENT_ID: your-client-id
+      TESLA_CLIENT_SECRET: your-client-secret
+      TESLA_REDIRECT_URI: https://localhost/callback
+      TESLA_FLEET_REGION: eu
+      TESLA_FLEET_TOKEN_FILE: /data/fleet_token.json
+      # TESLA_VIN: VIN1,VIN2   # optional — default: all cars on the account
       TESLAMATE_DB_HOST: database
       TESLAMATE_DB_PORT: 5432
       TESLAMATE_DB_NAME: teslamate
       TESLAMATE_DB_USER: teslamate
       TESLAMATE_DB_PASS: password
       TARGET_CURRENCY: CZK/EUR/CHF/USD (enter only one value here)
-      LOOKBACK_DAYS: 30
+      LOOKBACK_DAYS: 7
       TIME_TOLERANCE_S: 600
       OVERWRITE_EXISTING: "false"
       LOG_FILE: /logs/importer.log
@@ -106,37 +114,89 @@ networks:
     name: teslamate_default   # ← replace with your actual network name
 ```
 
-### 4 — Authorise the Tesla token (one-time)
+### 4 — Tesla Fleet API setup (one-time)
 
-Run the container interactively the first time. It will ask for your Tesla credentials:
+> Tesla appears to no longer support the unofficial `ownership.tesla.com/mobile-app/charging/history`
+> endpoint this tool originally used. The importer now uses the official
+> [Fleet API charging endpoint](https://developer.tesla.com/docs/fleet-api/endpoints/charging-endpoints)
+> (`GET /api/1/dx/charging/history`), which returns the same data. The legacy mode is still
+> available via `TESLA_API_MODE=ownership`.
+
+**4a — Create a developer app**
+
+1. Sign in at [developer.tesla.com](https://developer.tesla.com) with your Tesla account and create an application.
+2. **Allowed Origin:** `https://<your-domain>` (e.g. `https://your-name.github.io`)
+3. **Allowed Redirect URI:** `https://localhost/callback` (or any URL — it only needs to match `TESLA_REDIRECT_URI`)
+4. **Scopes:** *Vehicle Information* and *Vehicle Charging Management* (`vehicle_device_data`, `vehicle_charging_cmds`)
+5. Copy the **Client ID** and **Client Secret** into your configuration.
+6. In the billing settings, set a low **billing limit** (e.g. $1) as a safety net.
+
+**4b — Host a public key on your domain**
+
+Tesla requires every app to be registered with a domain that serves a public key. Generate one:
 
 ```bash
-docker compose run --rm importer
+openssl ecparam -name prime256v1 -genkey -noout -out private-key.pem
+openssl ec -in private-key.pem -pubout -out public-key.pem
 ```
 
-You will be prompted for a **refresh token**. Two ways to get one:
+Publish `public-key.pem` at:
 
-**Option A — tesla-info.com (easiest):**
-1. Visit [https://tesla-info.com/tesla-token.php](https://tesla-info.com/tesla-token.php)
-2. Log in with your Tesla account (the site only brokers the OAuth flow)
-3. Copy the `refresh_token` and paste it into the prompt
+```
+https://<your-domain>/.well-known/appspecific/com.tesla.3p.public-key.pem
+```
 
-**Option B — manual OAuth:**
-1. Open this URL in your browser and log in:
-   ```
-   https://auth.tesla.com/oauth2/v3/authorize?client_id=ownerapi&redirect_uri=https://auth.tesla.com/void/callback&response_type=code&scope=openid+email+offline_access+vehicle_device_data+vehicle_charging_cmds&state=state
-   ```
-2. After login you are redirected to a URL starting with `https://auth.tesla.com/void/callback?code=…`
-3. Copy the **entire URL** and paste it into the prompt
+A GitHub Pages repository works fine (add an empty `.nojekyll` file so the `.well-known` folder is served).
+Keep `private-key.pem` private — it is only needed for vehicle commands, which this tool does not use.
+You do **not** need to pair a virtual key with your car.
 
-The token is saved to `./data/tesla_cache.json` and refreshed automatically — you only do this once.
+**4c — Register the app in your region (one-time)**
+
+```bash
+docker compose run --rm importer --register-domain your-name.github.io
+```
+
+**4d — Log in with your Tesla account (one-time)**
+
+```bash
+docker compose run --rm importer --auth
+```
+
+1. Open the printed URL in your browser, log in and approve access.
+2. You are redirected to `https://localhost/callback?code=…` — the page will fail to load, that is expected.
+3. Copy the **entire URL** from the address bar and paste it into the prompt.
+
+The token is saved to `./data/fleet_token.json` and refreshed automatically on every run
+(Tesla rotates refresh tokens, so keep the `/data` volume persistent).
+
+**What does it cost?**
+
+The Fleet API is pay-per-use, but Tesla gives every developer account a monthly credit.
+A nightly run makes one `/vehicles` request plus one charging-history request per car
+(25 sessions per page, filtered server-side to `LOOKBACK_DAYS`) — roughly 30–90 requests
+per month, a few cents at most, well within the free credit. Check the current rates under
+*Billing and limits* in the [Fleet API docs](https://developer.tesla.com/docs/fleet-api/billing-and-limits).
+
+<details>
+<summary>Legacy mode: ownership API (TESLA_API_MODE=ownership)</summary>
+
+Set `TESLA_API_MODE=ownership` and `TESLA_EMAIL`, then run `docker compose run --rm importer`.
+You will be prompted for a refresh token, e.g. from [tesla-info.com](https://tesla-info.com/tesla-token.php),
+or for the callback URL after logging in at:
+
+```
+https://auth.tesla.com/oauth2/v3/authorize?client_id=ownerapi&redirect_uri=https://auth.tesla.com/void/callback&response_type=code&scope=openid+email+offline_access+vehicle_device_data+vehicle_charging_cmds&state=state
+```
+
+The token is saved to `./data/tesla_cache.json`.
+</details>
 
 ### 5 — Dry-run (preview)
 
 See exactly what would be written without touching the database:
 
 ```bash
-docker compose run --rm importer python importer.py --dry-run
+docker compose run --rm importer --dry-run
 ```
 
 Example output:
@@ -175,17 +235,15 @@ On your server, open the crontab:
 crontab -e
 ```
 
-Add a line to run the importer daily at 6:00 AM:
+Costs do not need to appear right after charging, so once a night is enough (and the cheapest).
+Add a line to run the importer every night at 3:00 AM:
 
 ```cron
-0 6 * * * cd /path/to/teslamate-supercharger-costs && docker compose run --rm importer >> /var/log/tesla_suc_cron.log 2>&1
+0 3 * * * cd /path/to/teslamate-supercharger-costs && docker compose run --rm importer >> /var/log/tesla_suc_cron.log 2>&1
 ```
 
-Or twice a day (6:00 and 18:00):
-
-```cron
-0 6,18 * * * cd /path/to/teslamate-supercharger-costs && docker compose run --rm importer >> /var/log/tesla_suc_cron.log 2>&1
-```
+With `LOOKBACK_DAYS=7` every night re-checks the last week, so late idle fees or a missed
+night are picked up automatically. Sessions that already have a cost are skipped.
 
 ---
 
@@ -224,15 +282,22 @@ All settings are environment variables. Set them in your `.env` file.
 
 | Variable | Required | Default | Description |
 |---|:---:|---|---|
-| `TESLA_EMAIL` | ✅ | — | Tesla account email |
 | `TESLAMATE_DB_PASS` | ✅ | — | TeslaMate PostgreSQL password |
-| `TESLA_CACHE_FILE` | | `/data/tesla_cache.json` | Path to the OAuth token cache inside the container |
-| `TESLA_VIN` | | *(first vehicle)* | VIN to use if you have multiple Teslas |
+| `TESLA_API_MODE` | | `fleet` if `TESLA_CLIENT_ID` is set, else `ownership` | `fleet` (official API) or `ownership` (legacy) |
+| `TESLA_CLIENT_ID` | fleet | — | Client ID of your developer app |
+| `TESLA_CLIENT_SECRET` | fleet | — | Client secret (needed for `--auth` and `--register-domain`) |
+| `TESLA_REDIRECT_URI` | | `https://localhost/callback` | Must match the app's allowed redirect URI |
+| `TESLA_FLEET_REGION` | | `eu` | `eu` (Europe/Middle East/Africa), `na` (North America/Asia-Pacific), `cn` |
+| `TESLA_FLEET_API_URL` | | *(from region)* | Override the regional Fleet API base URL |
+| `TESLA_FLEET_TOKEN_FILE` | | `/data/fleet_token.json` | Fleet API token storage inside the container |
+| `TESLA_EMAIL` | ownership | — | Tesla account email (legacy mode only) |
+| `TESLA_CACHE_FILE` | | `/data/tesla_cache.json` | teslapy token cache (legacy mode only) |
+| `TESLA_VIN` | | *(all vehicles)* | Comma-separated VINs to limit the import to |
 | `TESLAMATE_DB_HOST` | | `database` | PostgreSQL hostname (Docker service name) |
 | `TESLAMATE_DB_PORT` | | `5432` | PostgreSQL port |
 | `TESLAMATE_DB_NAME` | | `teslamate` | Database name |
 | `TESLAMATE_DB_USER` | | `teslamate` | Database user |
-| `LOOKBACK_DAYS` | | `30` | Days of history to fetch from Tesla API per run |
+| `LOOKBACK_DAYS` | | `9999` | Days of history to fetch per run (use `7` for nightly cron) |
 | `TIME_TOLERANCE_S` | | `120` | Max seconds difference for start-time matching |
 | `OVERWRITE_EXISTING` | | `false` | Set `true` to overwrite already-set costs |
 | `LOG_FILE` | | `/logs/importer.log` | Log file path inside the container |
@@ -249,6 +314,9 @@ Options:
   -i, --input FILE     Load sessions from a saved JSON file (for testing)
       --lookback DAYS  Override LOOKBACK_DAYS for this run
   -v, --verbose        Show debug output (skipped/free sessions)
+      --auth           Fleet API: interactive one-time login, then exit
+      --register-domain DOMAIN
+                       Fleet API: one-time app registration in your region, then exit
   -h, --help           Show this help message
 ```
 
@@ -259,7 +327,7 @@ Options:
 To import all historical sessions at once:
 
 ```bash
-docker compose run --rm importer python importer.py --lookback 3650
+docker compose run --rm importer --lookback 3650
 ```
 
 Note: The Tesla API typically returns up to 2 years of history.
@@ -268,7 +336,7 @@ Note: The Tesla API typically returns up to 2 years of history.
 
 ## How session matching works
 
-The importer matches a Tesla session to a TeslaMate `charging_processes` record by finding the record whose `start_date` is closest to the Tesla API's `chargeStartDateTime`, within `TIME_TOLERANCE_S` seconds (default: 120).
+The importer matches a Tesla session to a TeslaMate `charging_processes` record of the **same car** (by VIN, via TeslaMate's `cars` table) by finding the record whose `start_date` is closest to the Tesla API's `chargeStartDateTime`, within `TIME_TOLERANCE_S` seconds (default: 120).
 
 If you see many **NOT FOUND** warnings, try increasing `TIME_TOLERANCE_S` to `300` in your `.env`.
 
@@ -278,11 +346,15 @@ If you see many **NOT FOUND** warnings, try increasing `TIME_TOLERANCE_S` to `30
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `Unauthorized` error | Expired or invalid token | Delete `data/tesla_cache.json` and re-run interactively to re-authenticate |
+| `HTTP 401` / `Unauthorized` | Expired or invalid token | Run `docker compose run --rm importer --auth` again (legacy: delete `data/tesla_cache.json`) |
+| `HTTP 412` | App not registered in your region | Run `--register-domain <your-domain>` |
+| `HTTP 421` | Wrong region | Set `TESLA_FLEET_REGION` to `eu` or `na` |
+| `HTTP 403` | Missing scope | Enable *Vehicle Charging Management* for your app and re-run `--auth` |
+| `no terminal is attached` | First login attempted from cron | Run `--auth` once interactively |
 | Many `NOT FOUND` warnings | Clock drift or TeslaMate gap in data | Increase `TIME_TOLERANCE_S` to `300` |
 | `Connection refused` on DB | Wrong network or host name | Run `docker network ls` and update the network name in `docker-compose.yml` |
 | Sessions with cost already set are skipped | Expected behaviour | Set `OVERWRITE_EXISTING=true` to force re-import |
-| `TESLA_VIN` ignored | Typo in VIN | Double-check with `docker compose run --rm importer python importer.py --verbose` |
+| `TESLA_VIN` ignored | Typo in VIN | Double-check with `docker compose run --rm importer --verbose` |
 
 ---
 
@@ -322,7 +394,7 @@ Then revert:
 
 ```yaml
 OVERWRITE_EXISTING: "false"
-LOOKBACK_DAYS: 30
+LOOKBACK_DAYS: 7
 ```
 
 This rewrites all past Supercharger costs into your target currency.
