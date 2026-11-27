@@ -293,11 +293,30 @@ class TestSettings:
         r = client.post(PREFIX + "/settings", headers=AUTH, data=self.form(csrf(client)))
         assert r.status_code == 302
         saved = importer.load_web_settings()
-        assert saved["TARGET_CURRENCY"] == "EUR" and saved["TESLA_VIN"] == "all"
+        assert saved["TARGET_CURRENCY"] == "EUR" and "TESLA_VIN" not in saved
         assert importer.TIME_TOLERANCE_S == 300 and importer.SCHEDULE_TIME == "02:30"
         next_run = app.extensions["runner"].next_run
         local = next_run.astimezone(web.ZoneInfo("Europe/Prague"))
         assert (local.hour, local.minute) == (2, 30)
+
+    def test_values_set_in_docker_are_locked(self, config, db):
+        config.update(LOOKBACK_DAYS="14", TARGET_CURRENCY="CHF")
+        importer.save_web_settings({"LOOKBACK_DAYS": "30"})
+        app = web.create_app(root_path=PREFIX, password="", db_connector=lambda: db,
+                             fleet_factory=FakeFleet)
+        client = app.test_client()
+        html = text(client.get(PREFIX + "/settings"))
+        assert re.search(r'name="lookback_days"\s+disabled', html)
+        assert "Docker: LOOKBACK_DAYS" in html and 'value="14"' in html
+        assert not re.search(r'name="time_tolerance_s"\s+disabled', html)
+        # A crafted POST cannot change a locked value; the web value is kept for later.
+        r = client.post(PREFIX + "/settings", data=self.form(csrf(client, PREFIX + "/settings"),
+                                                            lookback_days="99", target_currency=""))
+        assert r.status_code == 302
+        saved = importer.load_web_settings()
+        assert saved["LOOKBACK_DAYS"] == "30" and "TARGET_CURRENCY" not in saved
+        assert importer.LOOKBACK_DAYS == 14 and importer.TARGET_CURRENCY == "CHF"
+        assert importer.TIME_TOLERANCE_S == 300
 
     def test_empty_schedule_turns_it_off(self, client, app):
         client.post(PREFIX + "/settings", headers=AUTH, data=self.form(csrf(client), schedule_time=""))

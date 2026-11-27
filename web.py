@@ -550,20 +550,23 @@ def create_app(root_path=None, password=None, user=None, start_scheduler=False,
     def settings():
         stored = importer.load_web_settings()
         error = None
+        locked = importer.ENV_LOCKED
         if request.method == "POST":
-            form = {key: (request.form.get(key.lower()) or "").strip() for key in importer.WEB_SETTINGS}
-            form["TARGET_CURRENCY"] = form["TARGET_CURRENCY"].upper()
-            form["TESLA_VIN"] = ",".join(v.strip().upper() for v in form["TESLA_VIN"].split(",")
-                                         if v.strip())
-            # Empty fields fall back to the environment; these need an explicit
-            # value so that "off" / "all vehicles" / "no conversion" can override it.
-            form["SCHEDULE_TIME"] = form["SCHEDULE_TIME"] or "off"
-            form["TESLA_VIN"] = form["TESLA_VIN"] or "all"
-            form["TARGET_CURRENCY"] = form["TARGET_CURRENCY"] or "NONE"
-            form = {k: v for k, v in form.items() if v}
+            # Values set in Docker cannot be changed here (fields are disabled).
+            editable = [key for key in importer.WEB_SETTINGS if key not in locked]
+            form = {key: (request.form.get(key.lower()) or "").strip() for key in editable}
+            if "TARGET_CURRENCY" in form:
+                form["TARGET_CURRENCY"] = form["TARGET_CURRENCY"].upper()
+            if "TESLA_VIN" in form:
+                form["TESLA_VIN"] = ",".join(v.strip().upper() for v in form["TESLA_VIN"].split(",")
+                                             if v.strip())
+            if "SCHEDULE_TIME" in form:
+                form["SCHEDULE_TIME"] = form["SCHEDULE_TIME"] or "off"  # empty = no nightly import
+            form = {k: v for k, v in form.items() if v}  # empty = default
             if form.get("TIMEZONE") and form["TIMEZONE"] not in available_timezones():
                 error = _("Unknown timezone '%(tz)s'.", tz=form["TIMEZONE"])
-            bad_vins = [v for v in form["TESLA_VIN"].split(",") if v.upper() not in ("", "ALL") and not _VIN.match(v)]
+            bad_vins = [v for v in form.get("TESLA_VIN", "").split(",")
+                        if v.upper() not in ("", "ALL") and not _VIN.match(v)]
             if bad_vins and not error:
                 error = _("Invalid VIN: %(vins)s", vins=", ".join(bad_vins))
             if not error:
@@ -571,7 +574,8 @@ def create_app(root_path=None, password=None, user=None, start_scheduler=False,
                     return busy()
                 try:
                     importer.configure(overrides=form)  # validates; raises before saving
-                    importer.save_web_settings(form)
+                    # Keep web values of settings now fixed in Docker, in case they are removed there.
+                    importer.save_web_settings({**{k: v for k, v in stored.items() if k in locked}, **form})
                     importer.configure()
                     runner.plan()
                     flash(_("Settings saved."))
@@ -581,11 +585,13 @@ def create_app(root_path=None, password=None, user=None, start_scheduler=False,
                     importer.configure()
                 finally:
                     runner.lock.release()
-            values = {key: request.form.get(key.lower(), "") for key in importer.WEB_SETTINGS}
+            values = {key: getattr(importer, key) if key in locked else request.form.get(key.lower(), "")
+                      for key in importer.WEB_SETTINGS}
         else:
-            # Show the effective values (web settings over environment).
+            # Show the effective values (Docker over web settings over defaults).
             values = {key: getattr(importer, key) for key in importer.WEB_SETTINGS}
         return render_template("settings.html", values=values, error=error, stored=stored,
+                               locked=locked,
                                currencies=COMMON_CURRENCIES, timezones=sorted(available_timezones()),
                                regions=list(importer.FLEET_API_URLS)), 400 if error else 200
 

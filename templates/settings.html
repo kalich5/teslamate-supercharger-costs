@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ _('Settings') }}{% endblock %}
-{% macro source(key) %}<span class="tag is-light is-small ml-1">{{ _('web') if key in stored else _('environment / default') }}</span>{% endmacro %}
+{% macro source(key) %}{% if key in locked %}<span class="tag is-info is-light ml-1" title="{{ _('Set in Docker (docker-compose.yml / .env) — change it there.') }}">Docker: {{ key }}</span>{% elif key in stored %}<span class="tag is-light ml-1">{{ _('web') }}</span>{% else %}<span class="tag is-light ml-1">{{ _('default') }}</span>{% endif %}{% endmacro %}
+{% macro lock(key) %}{{ 'disabled' if key in locked }}{% endmacro %}
 {% block content %}
 <h1 class="title">{{ _('Settings') }}</h1>
 {% if error %}<div class="notification is-danger is-light">{{ error }}</div>{% endif %}
@@ -9,44 +10,44 @@
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <div class="field">
     <label class="label">{{ _('Automatic import every night at') }} {{ source('SCHEDULE_TIME') }}</label>
-    <input class="input" name="schedule_time" type="time" value="{{ values.SCHEDULE_TIME }}">
+    <input class="input" name="schedule_time" {{ lock('SCHEDULE_TIME') }} type="time" value="{{ values.SCHEDULE_TIME }}">
     <p class="help">{{ _('Empty = no automatic import. Costs do not need to be there right after charging, so once a night is enough.') }}</p>
   </div>
   <div class="field">
     <label class="label">{{ _('Time zone') }} {{ source('TIMEZONE') }}</label>
-    <input class="input" name="timezone" value="{{ values.TIMEZONE }}" list="timezones">
+    <input class="input" name="timezone" {{ lock('TIMEZONE') }} value="{{ values.TIMEZONE }}" list="timezones">
   </div>
   <div class="field">
     <label class="label">{{ _('Days back') }} {{ source('LOOKBACK_DAYS') }}</label>
-    <input class="input" name="lookback_days" type="number" min="1" max="9999" value="{{ values.LOOKBACK_DAYS }}">
+    <input class="input" name="lookback_days" {{ lock('LOOKBACK_DAYS') }} type="number" min="1" max="9999" value="{{ values.LOOKBACK_DAYS }}">
     <p class="help">{{ _('How far back each automatic import looks. 7 days catches late idle fees and missed nights with a single request per car.') }}</p>
   </div>
   <div class="field">
     <label class="label">{{ _('Currency in TeslaMate') }} {{ source('TARGET_CURRENCY') }}</label>
-    <input class="input" name="target_currency" value="{{ values.TARGET_CURRENCY }}" list="currencies" maxlength="3">
+    <input class="input" name="target_currency" {{ lock('TARGET_CURRENCY') }} value="{{ values.TARGET_CURRENCY }}" list="currencies" maxlength="3">
     <p class="help">{{ _('Costs are converted to this currency using the ECB rate. Empty = keep the currency of the invoice.') }}</p>
   </div>
   <div class="field">
     <label class="label">{{ _('Vehicles (VIN)') }} {{ source('TESLA_VIN') }}</label>
-    <input class="input" name="tesla_vin" value="{{ values.TESLA_VIN }}" placeholder="{{ _('all vehicles') }}">
+    <input class="input" name="tesla_vin" {{ lock('TESLA_VIN') }} value="{{ values.TESLA_VIN }}" placeholder="{{ _('all vehicles') }}">
     <p class="help">{{ _('Comma-separated. Empty = all cars on the Tesla account; each charge is matched to the TeslaMate car with the same VIN.') }}</p>
   </div>
   <div class="field">
     <label class="label">{{ _('Matching tolerance (seconds)') }} {{ source('TIME_TOLERANCE_S') }}</label>
-    <input class="input" name="time_tolerance_s" type="number" min="1" value="{{ values.TIME_TOLERANCE_S }}">
+    <input class="input" name="time_tolerance_s" {{ lock('TIME_TOLERANCE_S') }} type="number" min="1" value="{{ values.TIME_TOLERANCE_S }}">
     <p class="help">{{ _('Maximum difference between the start time at Tesla and in TeslaMate.') }}</p>
   </div>
   <div class="field">
     <label class="label">{{ _('Fleet API region') }} {{ source('TESLA_FLEET_REGION') }}</label>
     <div class="select">
-      <select name="tesla_fleet_region">
+      <select name="tesla_fleet_region" {{ lock('TESLA_FLEET_REGION') }}>
         {% for r in regions %}<option value="{{ r }}" {{ 'selected' if r == values.TESLA_FLEET_REGION }}>{{ r|upper }}</option>{% endfor %}
       </select>
     </div>
     <p class="help">{{ _('EU = Europe, Middle East, Africa; NA = North America and Asia-Pacific.') }}</p>
   </div>
   <div class="buttons mt-5"><button class="button is-info">{{ _('Save') }}</button></div>
-  <p class="help">{{ _('Saved here, these settings override the environment variables, also for imports started from cron.') }}</p>
+  <p class="help">{{ _('You can set each of these either here or in Docker (environment in docker-compose.yml or .env). A value set in Docker takes precedence and is shown here read-only. Settings saved here also apply to imports started from the command line.') }}</p>
 </form>
 
 <h2 class="title is-5 mt-6">{{ _('Language') }}</h2>

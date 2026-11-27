@@ -137,22 +137,27 @@ class TestConfigure:
         with pytest.raises(importer.ConfigError, match="TESLA_EMAIL"):
             importer.validate_config()
 
-    def test_web_settings_override_environment(self, config):
-        config["LOOKBACK_DAYS"] = "30"
-        importer.save_web_settings({"LOOKBACK_DAYS": "7", "TESLA_VIN": "vin1, vin2",
+    def test_web_settings_apply_when_not_set_in_docker(self):
+        importer.save_web_settings({"LOOKBACK_DAYS": "30", "TESLA_VIN": "vin1, vin2",
                                     "NOT_ALLOWED": "x"})
         importer.configure()
-        assert importer.LOOKBACK_DAYS == 7
+        assert importer.LOOKBACK_DAYS == 30
         assert importer.TESLA_VINS == ["VIN1", "VIN2"]
+        assert importer.ENV_LOCKED == set()
         assert "NOT_ALLOWED" not in json.loads(open(importer.SETTINGS_FILE).read())
 
-    def test_all_and_none_override_environment(self, config):
-        config.update(TESLA_VIN="VIN1", TARGET_CURRENCY="EUR", SCHEDULE_TIME="02:00")
-        importer.save_web_settings({"TESLA_VIN": "all", "TARGET_CURRENCY": "NONE",
-                                    "SCHEDULE_TIME": "off"})
+    def test_docker_environment_wins_and_locks(self, config):
+        config.update(LOOKBACK_DAYS="14", SCHEDULE_TIME="off")
+        importer.save_web_settings({"LOOKBACK_DAYS": "30", "SCHEDULE_TIME": "02:00",
+                                    "TIME_TOLERANCE_S": "300"})
         importer.configure()
-        assert importer.TESLA_VINS == [] and importer.TARGET_CURRENCY == "" \
-            and importer.SCHEDULE_TIME == ""
+        assert importer.LOOKBACK_DAYS == 14 and importer.SCHEDULE_TIME == ""
+        assert importer.TIME_TOLERANCE_S == 300
+        assert importer.ENV_LOCKED == {"LOOKBACK_DAYS", "SCHEDULE_TIME"}
+
+    def test_defaults(self):
+        assert importer.LOOKBACK_DAYS == 7 and importer.SCHEDULE_TIME == "03:00" \
+            and importer.TESLA_VINS == [] and importer.TARGET_CURRENCY == ""
 
     @pytest.mark.parametrize("key,value", [("LOOKBACK_DAYS", "abc"), ("SCHEDULE_TIME", "25:99"),
                                            ("TESLA_API_MODE", "x"), ("TARGET_CURRENCY", "EURO"),

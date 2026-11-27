@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PROJECT VERSION\n"
 "Report-Msgid-Bugs-To: EMAIL@ADDRESS\n"
-"POT-Creation-Date: 2026-11-27 21:54+0000\n"
+"POT-Creation-Date: 2026-11-27 22:02+0000\n"
 "PO-Revision-Date: 2026-11-27 21:54+0000\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language: cs\n"
@@ -406,9 +406,6 @@ msgstr "Uložit tyto ceny"
 msgid "Saved"
 msgstr "Uloženo"
 
-msgid "Saved here, these settings override the environment variables, also for imports started from cron."
-msgstr "Nastavení uložená tady mají přednost před proměnnými prostředí, i pro importy spouštěné z cronu."
-
 #, python-format
 msgid "Saved: %(n)s"
 msgstr "Uloženo: %(n)s"
@@ -420,6 +417,9 @@ msgstr "Viz .env.example (%(vars)s, …)."
 #, python-format
 msgid "Sessions from Tesla: %(n)s"
 msgstr "Nabíjení z Tesly: %(n)s"
+
+msgid "Set in Docker (docker-compose.yml / .env) — change it there."
+msgstr "Nastaveno v Dockeru (docker-compose.yml / .env) — změňte to tam."
 
 msgid "Set in the environment"
 msgstr "Nastaveno v prostředí"
@@ -547,11 +547,20 @@ msgstr "Zapsat ceny do TeslaMate teď?"
 msgid "You can also paste an existing Fleet API refresh token."
 msgstr "Můžete také vložit existující refresh token Fleet API."
 
+msgid ""
+"You can set each of these either here or in Docker (environment in docker-compose.yml or .env). A"
+" value set in Docker takes precedence and is shown here read-only. Settings saved here also apply"
+" to imports started from the command line."
+msgstr ""
+"Každé z těchto nastavení můžete zadat buď tady, nebo v Dockeru (environment v docker-compose.yml "
+"nebo .env). Hodnota z Dockeru má přednost a tady se jen zobrazí. Nastavení uložená tady platí i "
+"pro importy spouštěné z příkazové řádky."
+
 msgid "all vehicles"
 msgstr "všechna auta"
 
-msgid "environment / default"
-msgstr "prostředí / výchozí"
+msgid "default"
+msgstr "výchozí"
 
 #, python-format
 msgid "incl. idle fee %(fee)s"

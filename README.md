@@ -73,7 +73,7 @@ Open **`http://<server>:4002/supercharger`** and log in with `admin` / your `WEB
 | **Overview** | Tesla login state, next nightly import, last import, number of Supercharger charges without a cost; *Preview* and *Import and save* buttons |
 | **Charges** | Supercharger charges recorded by TeslaMate with their cost — filter the ones without a cost and enter or correct a cost by hand |
 | **Tesla account** | Step-by-step Fleet API setup: key pair, region registration, login, vehicles on the account |
-| **Settings** | Nightly import time, days back, currency, vehicles, matching tolerance, region, language |
+| **Settings** | Nightly import time, days back, currency, vehicles, matching tolerance, region, language — or set them in Docker, see [Configuration reference](#configuration-reference) |
 
 The result of every import lists each Tesla session with its status (*Saved*, *Already had a cost*,
 *Not found in TeslaMate*, *Free*) and a link to Tesla's PDF invoice.
@@ -233,9 +233,16 @@ leave `WEB_PASSWORD` empty; then remove the `ports:` mapping so the UI is reacha
 
 ## Configuration reference
 
-Settings are environment variables in `.env`. The ones marked 🖥 can also be changed in the web UI
-(**Settings**); values saved there are stored in `./data/settings.json` and take precedence — also for
-imports started from the command line.
+Settings are environment variables — in `.env` or directly in the `environment:` section of your
+`docker-compose.yml`. The ones marked 🖥 can be set **either in Docker or in the web UI** (**Settings**),
+whichever you prefer:
+
+- **Set in Docker** → the value is used and shown in the web UI as read-only (*Docker: VARIABLE*).
+  To change it, edit `.env` / `docker-compose.yml` and run `docker compose up -d`.
+- **Not set in Docker** → change it in the web UI; it is stored in `./data/settings.json`.
+
+Both the web UI and the command line use the same values. In `.env.example` the 🖥 settings are
+commented out, so they start out editable in the web UI.
 
 | Variable | Required | Default | Description |
 |---|:---:|---|---|
@@ -262,7 +269,7 @@ imports started from the command line.
 | `TESLAMATE_DB_USER` | | `teslamate` | Database user |
 | `SCHEDULE_TIME` 🖥 | | `03:00` | Nightly import time (local, `HH:MM`); `off` disables it |
 | `TIMEZONE` 🖥 | | `TZ` or `UTC` | Time zone of `SCHEDULE_TIME` and of times shown in the web UI |
-| `LOOKBACK_DAYS` 🖥 | | `9999` | Days of history to fetch per run (use `7` for the nightly import) |
+| `LOOKBACK_DAYS` 🖥 | | `7` | Days of history to fetch per run (e.g. `3650` once for a backfill) |
 | `TIME_TOLERANCE_S` 🖥 | | `120` | Max seconds difference for start-time matching |
 | `TARGET_CURRENCY` 🖥 | | *(none)* | Convert all costs to this currency (ECB rates) |
 | `OVERWRITE_EXISTING` | | `false` | Set `true` to overwrite already-set costs |
@@ -477,7 +484,7 @@ To add a language (e.g. German) or update one after changing texts:
 ```bash
 pybabel extract -F babel.cfg --no-location --sort-output -o translations/messages.pot .
 pybabel init -i translations/messages.pot -d translations -l de      # new language
-pybabel update -i translations/messages.pot -d translations --no-location
+pybabel update --ignore-obsolete -i translations/messages.pot -d translations
 pybabel compile -d translations
 ```
 

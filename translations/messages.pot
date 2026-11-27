@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PROJECT VERSION\n"
 "Report-Msgid-Bugs-To: EMAIL@ADDRESS\n"
-"POT-Creation-Date: 2026-11-27 21:54+0000\n"
+"POT-Creation-Date: 2026-11-27 22:02+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -395,11 +395,6 @@ msgstr ""
 msgid "Saved"
 msgstr ""
 
-msgid ""
-"Saved here, these settings override the environment variables, also for "
-"imports started from cron."
-msgstr ""
-
 #, python-format
 msgid "Saved: %(n)s"
 msgstr ""
@@ -410,6 +405,9 @@ msgstr ""
 
 #, python-format
 msgid "Sessions from Tesla: %(n)s"
+msgstr ""
+
+msgid "Set in Docker (docker-compose.yml / .env) — change it there."
 msgstr ""
 
 msgid "Set in the environment"
@@ -533,10 +531,17 @@ msgstr ""
 msgid "You can also paste an existing Fleet API refresh token."
 msgstr ""
 
+msgid ""
+"You can set each of these either here or in Docker (environment in "
+"docker-compose.yml or .env). A value set in Docker takes precedence and "
+"is shown here read-only. Settings saved here also apply to imports "
+"started from the command line."
+msgstr ""
+
 msgid "all vehicles"
 msgstr ""
 
-msgid "environment / default"
+msgid "default"
 msgstr ""
 
 #, python-format

@@ -77,9 +77,11 @@ def setup_logging(log_file: str) -> logging.Logger:
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 #
-# Settings come from environment variables. Settings saved in the web UI
-# (DATA_DIR/settings.json) take precedence over them, so the web UI and the
-# CLI / cron job always use the same values.
+# Settings come from environment variables (docker-compose / .env). The ones
+# in WEB_SETTINGS that are NOT set there can be changed in the web UI, which
+# stores them in DATA_DIR/settings.json. A value set in Docker always wins and
+# is shown read-only in the web UI. The CLI / cron job reads the same files,
+# so both always use the same values.
 
 class ConfigError(Exception):
     """Invalid or missing configuration."""
@@ -128,12 +130,15 @@ def configure(overrides: dict | None = None, environ=None, use_file: bool = True
     """
     (Re)load the configuration into the module-level settings below.
 
-    Order of precedence: *overrides* > settings.json (web UI) > environment.
-    Raises ConfigError for invalid values; nothing is changed in that case.
+    Order of precedence: *overrides* > environment (Docker) > settings.json
+    (web UI) > defaults. Raises ConfigError for invalid values; nothing is
+    changed in that case.
     """
-    values = {k: v for k, v in (os.environ if environ is None else environ).items()}
+    env = {k: v for k, v in (os.environ if environ is None else environ).items()}
+    values = {}
     if use_file:
         values.update({k: str(v) for k, v in load_web_settings().items() if v is not None})
+    values.update(env)
     values.update({k: str(v) for k, v in (overrides or {}).items() if v is not None})
 
     def get(key, default=None):
@@ -196,7 +201,7 @@ def configure(overrides: dict | None = None, environ=None, use_file: bool = True
         "DB_USER":                get("TESLAMATE_DB_USER", "teslamate"),
         "DB_PASS":                get("TESLAMATE_DB_PASS"),
         "DB_TIMEZONE_OVERRIDE":   get("TESLAMATE_DB_TIMEZONE", ""),
-        "LOOKBACK_DAYS":          integer("LOOKBACK_DAYS", "9999"),
+        "LOOKBACK_DAYS":          integer("LOOKBACK_DAYS", "7"),
         "TIME_TOLERANCE_S":       integer("TIME_TOLERANCE_S", "120"),
         "OVERWRITE_EXISTING":     get("OVERWRITE_EXISTING", "false").lower() == "true",
         "LOG_FILE":               get("LOG_FILE", "/logs/importer.log"),
@@ -211,6 +216,8 @@ def configure(overrides: dict | None = None, environ=None, use_file: bool = True
     }
     if new["TARGET_CURRENCY"] and (len(new["TARGET_CURRENCY"]) != 3 or not new["TARGET_CURRENCY"].isalpha()):
         raise ConfigError(f"TARGET_CURRENCY must be a 3-letter code, got '{new['TARGET_CURRENCY']}'")
+    # Web UI settings fixed by the environment (shown read-only there).
+    new["ENV_LOCKED"] = {k for k in WEB_SETTINGS if str(env.get(k) or "").strip()}
     globals().update(new)
 
 
