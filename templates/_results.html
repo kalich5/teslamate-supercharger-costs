@@ -16,7 +16,7 @@
       <tr>
         <td class="nowrap">{{ r.start|dt }}</td>
         <td>{{ r.location }}</td>
-        <td class="is-size-7 has-text-grey">{{ r.vin or '' }}</td>
+        <td class="vin">{{ r.vin or '' }}</td>
         <td class="has-text-right">{{ '%.1f'|format(c.kwh) if c and c.kwh }}</td>
         <td class="has-text-right nowrap">
           {% if c %}{{ c.original_total|money(c.original_currency) }}

@@ -1,10 +1,11 @@
 # TeslaMate Supercharger Cost Importer
 
-[![Docker Image](https://img.shields.io/badge/docker-ghcr.io-blue?logo=docker)](https://github.com/YOUR_USERNAME/teslamate-supercharger-costs/pkgs/container/teslamate-supercharger-costs)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue?logo=python)](https://www.python.org)
 
-Automatically fetches **real Supercharger session costs** from the official **Tesla Fleet API** and writes them into your self-hosted [TeslaMate](https://github.com/teslamate-org/teslamate) instance — no manual entry, no fixed per-kWh estimates.
+Automatically fetches **real Supercharger session costs** from the official **Tesla Fleet API** and writes them into your self-hosted [TeslaMate](https://github.com/teslamate-org/teslamate) instance — no manual entry, no fixed per-kWh estimates. Comes with a small web interface for the setup, imports and corrections.
+
+![Overview](docs/overview.png)
 
 ---
 
@@ -12,12 +13,19 @@ Automatically fetches **real Supercharger session costs** from the official **Te
 
 TeslaMate does not natively pull billing data from Tesla. The only built-in option is to set a fixed price per kWh on a geofence — which breaks the moment Tesla changes pricing, when you charge abroad, or when time-of-use rates apply.
 
-This tool solves that by fetching the **actual invoice amount** from the same API your Tesla app uses, then matching it to the correct TeslaMate charging session by timestamp.
+This tool solves that by fetching the **actual invoice amount** of every Supercharger session from Tesla, then matching it to the correct TeslaMate charging session by car and start time. It runs every night by itself.
 
 ```
-Tesla API  ──►  importer.py  ──►  TeslaMate PostgreSQL
-(real costs)                       (charging_processes.cost)
+Tesla Fleet API  ──►  importer (every night)  ──►  TeslaMate PostgreSQL
+(invoices)                 ▲                       (charging_processes.cost)
+                           │
+                     web interface
+          (setup, preview, manual corrections)
 ```
+
+> **Note:** Version 1 used the unofficial `ownership.tesla.com` endpoint of the Tesla app, which Tesla
+> appears to no longer support. Version 2 uses the official Fleet API — see
+> [Upgrading from version 1.x](#upgrading-from-version-1x).
 
 ---
 
@@ -76,17 +84,14 @@ Open **`http://<server>:4002/supercharger`** and log in with `admin` / your `WEB
 | **Settings** | Nightly import time, days back, currency, vehicles, matching tolerance, region, language — or set them in Docker, see [Configuration reference](#configuration-reference) |
 
 The result of every import lists each Tesla session with its status (*Saved*, *Already had a cost*,
-*Not found in TeslaMate*, *Free*) and a link to Tesla's PDF invoice.
+*Not found in TeslaMate*, *Free*) and a link to Tesla's PDF invoice:
+
+![Import result](docs/import-result.png)
 
 ### 3 — Tesla Fleet API setup (one-time)
 
-> Tesla appears to no longer support the unofficial `ownership.tesla.com/mobile-app/charging/history`
-> endpoint this tool originally used. The importer now uses the official
-> [Fleet API charging endpoint](https://developer.tesla.com/docs/fleet-api/endpoints/charging-endpoints)
-> (`GET /api/1/dx/charging/history`), which returns the same data. The legacy mode is still
-> available via `TESLA_API_MODE=ownership`.
-
-The **Tesla account** page guides you through these steps and shows which are done.
+The importer reads the [Fleet API charging history](https://developer.tesla.com/docs/fleet-api/endpoints/charging-endpoints)
+(`GET /api/1/dx/charging/history`). The **Tesla account** page guides you through these steps and shows which are done.
 
 **3a — Create a developer app**
 
@@ -300,13 +305,24 @@ Run it in the container with `docker compose run --rm importer python importer.p
 
 ## Historical backfill
 
-To import all historical sessions at once, enter `3650` as *Days back* on the Overview page, or:
+To import all past sessions once, enter `3650` as *Days back* on the Overview page, click **Preview**
+and then **Save these costs** — or on the command line:
 
 ```bash
 docker compose run --rm importer python importer.py --lookback 3650
 ```
 
-Note: The Tesla API typically returns up to 2 years of history.
+How far back Tesla returns the charging history is up to Tesla; check the preview.
+
+To **re-import costs that are already set** (e.g. to convert all of them to a new target currency),
+run once with overwriting enabled:
+
+```bash
+docker compose run --rm -e OVERWRITE_EXISTING=true importer python importer.py --lookback 3650 --dry-run
+docker compose run --rm -e OVERWRITE_EXISTING=true importer python importer.py --lookback 3650
+```
+
+Single costs can also be corrected by hand on the **Charges** page.
 
 ---
 
@@ -319,127 +335,83 @@ A session TeslaMate did not record at all (e.g. it was offline) can be given its
 
 ---
 
-## Troubleshooting
+## Currency conversion
 
-| Symptom | Likely cause | Fix |
-|---|---|---|
-| *Not logged in to the Tesla Fleet API* | First start, or login removed | Tesla account page → **Log in with Tesla** |
-| `HTTP 401` / `Unauthorized` | Expired or revoked token | Log in again on the Tesla account page |
-| `HTTP 412` | App not registered in your region | Tesla account page → **Register** |
-| `HTTP 421` | Wrong region | Change the region in Settings (`eu` / `na`) |
-| `HTTP 403` | Missing scope | Enable *Vehicle Charging Management* for your app and log in again |
-| Registration fails: key not found | Public key not reachable on your domain | Check `https://<domain>/.well-known/appspecific/com.tesla.3p.public-key.pem` in a browser |
-| Many *Not found* sessions | Clock drift or TeslaMate gap in data | Increase the matching tolerance to `300` s |
-| `Connection refused` on DB | Wrong network or host name | Run `docker network ls` and set `TESLAMATE_NETWORK` in `.env` |
-| *Charges* page is empty | TeslaMate did not record the charger as a Tesla Supercharger | The import still works — it matches by time, not by charger type |
-| Sessions with cost already set are skipped | Expected behaviour | Correct single costs on the Charges page, or set `OVERWRITE_EXISTING=true` |
+Set a target currency (Settings or `TARGET_CURRENCY`) to store all costs in one currency — useful if you
+charge abroad. Without it, each cost is stored in the currency of Tesla's invoice.
+
+- Exchange rates come from the [European Central Bank](https://www.ecb.europa.eu/stats/policy_and_exchange_rates/euro_reference_exchange_rates/html/index.en.html) — no API key needed.
+- The **latest daily reference rate** at the time of the import is used (not the rate of the charging day).
+  With the nightly import that is the rate of the following day at most.
+- The import result shows the original amount from the invoice next to the converted cost.
 
 ---
 
-## 💱 Currency Conversion (NEW)
+## Upgrading from version 1.x
 
-This importer can automatically convert all charging costs into a single target currency (e.g. CHF).
+Version 2 switches to the official Fleet API and runs as a web service:
 
-- Uses European Central Bank (ECB)
-- No API key required
-- Uses **historical rates based on charging date**
-- Cached for performance with fallback to latest rates
-
-Example:
-
-```
-228.47 CZK → 9.12 CHF (rate from 2026-04-09)
-```
-
----
-
-## 🔄 Backfill Existing Data (IMPORTANT)
-
-You can convert already stored historical data. Run once with overwriting enabled:
-
-```bash
-docker compose run --rm -e OVERWRITE_EXISTING=true importer python importer.py --lookback 730
-```
-
-This rewrites all past Supercharger costs into your target currency.
+1. Create the Tesla developer app and add `TESLA_CLIENT_ID` / `TESLA_CLIENT_SECRET` to `.env`
+   (see [Tesla Fleet API setup](#3--tesla-fleet-api-setup-one-time)). `TESLA_EMAIL` is no longer needed.
+2. Add `WEB_PASSWORD` and, if your network is not `teslamate_default`, `TESLAMATE_NETWORK` to `.env`.
+3. `docker compose up -d --build` and finish the setup on the **Tesla account** page.
+4. **Remove your cron job** — the import now runs every night by itself. If you want to keep cron,
+   change the command to `docker compose run --rm importer python importer.py` (without
+   `python importer.py` it would start a second web server) and turn the built-in schedule off.
+5. `LOOKBACK_DAYS` now defaults to `7`. If you set it in `.env`, it stays as it is and is shown
+   read-only in the web UI.
 
 ---
 
-## 📊 Grafana Analytics (Advanced)
+## Grafana queries
 
-You can now build powerful dashboards in TeslaMate Grafana:
+Some starting points for your own TeslaMate Grafana panels.
 
-### Cost per km
-
-```sql
-SELECT
-  d.start_date,
-  (d.cost / NULLIF(d.distance, 0)) AS cost_per_km
-FROM drives d
-WHERE d.distance > 0
-```
-
-### Cost per 100 km
+**Monthly Supercharger spending**
 
 ```sql
-SELECT
-  (d.cost / NULLIF(d.distance, 0)) * 100 AS cost_per_100km
-FROM drives d
-WHERE d.distance > 0
-```
-
-### Cost per kWh
-
-```sql
-SELECT
-  (cp.cost / NULLIF(cp.charge_energy_added, 0)) AS cost_per_kwh
+SELECT date_trunc('month', cp.start_date) AS month,
+       SUM(cp.cost)                       AS cost,
+       SUM(cp.charge_energy_added)        AS kwh,
+       SUM(cp.cost) / NULLIF(SUM(cp.charge_energy_added), 0) AS cost_per_kwh
 FROM charging_processes cp
-WHERE cp.charge_energy_added > 0
+WHERE cp.cost IS NOT NULL
+  AND EXISTS (SELECT 1 FROM charges ch
+              WHERE ch.charging_process_id = cp.id
+                AND ch.fast_charger_present AND ch.fast_charger_brand ILIKE 'tesla%')
+GROUP BY 1
+ORDER BY 1
 ```
 
-### Efficiency (kWh/km)
+**Most expensive Superchargers per kWh**
 
 ```sql
-SELECT
-  (d.consumption_kwh / NULLIF(d.distance, 0)) AS kwh_per_km
-FROM drives d
-WHERE d.distance > 0
-```
-
-### 🌍 Map of expensive Superchargers
-
-```sql
-SELECT
-  cp.latitude,
-  cp.longitude,
-  (cp.cost / cp.charge_energy_added) AS price
+SELECT COALESCE(g.name, a.name, a.display_name)                       AS location,
+       COUNT(*)                                                         AS charges,
+       ROUND(SUM(cp.cost) / NULLIF(SUM(cp.charge_energy_added), 0), 2) AS cost_per_kwh
 FROM charging_processes cp
-WHERE cp.charge_energy_added > 0
+LEFT JOIN geofences g ON g.id = cp.geofence_id
+LEFT JOIN addresses a ON a.id = cp.address_id
+WHERE cp.cost IS NOT NULL AND cp.charge_energy_added > 0
+  AND EXISTS (SELECT 1 FROM charges ch
+              WHERE ch.charging_process_id = cp.id
+                AND ch.fast_charger_present AND ch.fast_charger_brand ILIKE 'tesla%')
+GROUP BY 1
+ORDER BY cost_per_kwh DESC
+LIMIT 20
 ```
 
-### 🧠 Anomaly detection
+**Charging cost per 100 km by month** (all charging, home included)
 
 ```sql
-WITH stats AS (
-  SELECT
-    AVG(cp.cost / cp.charge_energy_added) AS avg_price,
-    STDDEV(cp.cost / cp.charge_energy_added) AS std_price
-  FROM charging_processes cp
-)
-SELECT *
-FROM charging_processes cp, stats
-WHERE ABS((cp.cost / cp.charge_energy_added) - stats.avg_price) > 2 * stats.std_price
+WITH c AS (SELECT date_trunc('month', start_date) AS month, SUM(cost)     AS cost FROM charging_processes GROUP BY 1),
+     d AS (SELECT date_trunc('month', start_date) AS month, SUM(distance) AS km   FROM drives             GROUP BY 1)
+SELECT month, c.cost / NULLIF(d.km, 0) * 100 AS cost_per_100km
+FROM c JOIN d USING (month)
+ORDER BY month
 ```
 
----
-
-## 🧠 What this enables
-
-- Unified currency across all sessions
-- Accurate historical cost tracking
-- Cost/km and cost/kWh analytics
-- Detection of expensive charging sessions
-- Optimization of charging locations
+For home charging costs, see [teslamate-private-charging-costs](https://github.com/kalich5/teslamate-private-charging-costs).
 
 ---
 
@@ -453,6 +425,7 @@ WHERE ABS((cp.cost / cp.charge_energy_added) - stats.avg_price) > 2 * stats.std_
 ├── templates/, static/       # Web pages and bundled Bulma CSS
 ├── translations/             # gettext translations (cs), babel.cfg for extraction
 ├── tests.py, tests_web.py    # pytest tests (no network or database needed)
+├── docs/                     # Screenshots for this README
 ├── Dockerfile                # Container image definition
 ├── docker-compose.yml        # Compose file for standalone deployment
 ├── requirements.txt          # Python dependencies

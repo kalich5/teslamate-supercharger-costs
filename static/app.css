@@ -9,3 +9,5 @@ pre.log { max-height: 420px; overflow: auto; font-size: 12px; }
 code.break { word-break: break-all; }
 td.nowrap, th.nowrap { white-space: nowrap; }
 .results td { vertical-align: middle; }
+.results .tag { white-space: normal; height: auto; min-height: 2em; text-align: center; }
+.results td.vin { font-size: .75rem; color: #7a7a7a; word-break: break-all; min-width: 8em; }

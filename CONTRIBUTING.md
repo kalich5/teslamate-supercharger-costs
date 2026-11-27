@@ -13,12 +13,27 @@ Bug fixes and code improvements - https://github.com/999happyvolts
 ## Development setup
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/teslamate-supercharger-costs
+git clone https://github.com/kalich5/teslamate-supercharger-costs
 cd teslamate-supercharger-costs
 
 python -m venv .venv
 source .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
+```
+
+## Tests
+
+The tests fake the Tesla API and the TeslaMate database, so they need neither:
+
+```bash
+pip install pytest
+pytest tests.py tests_web.py
+```
+
+Run the web interface locally (with `TESLAMATE_DB_PASS` etc. set in your shell):
+
+```bash
+DATA_DIR=./data LOG_FILE= python web.py      # http://localhost:4002/supercharger
 ```
 
 ## Testing without a live Tesla account
@@ -36,6 +51,8 @@ python importer.py --input sample_history.json --dry-run
 - [ ] Secrets / credentials are never hardcoded
 - [ ] New env vars are documented in `.env.example`
 - [ ] `README.md` is updated if behaviour changes
+- [ ] New web texts are translated (`translations/`, see README → Translations) — `pytest` checks this
+- [ ] `pytest tests.py tests_web.py` passes
 - [ ] Tested with `--dry-run` before merging
 
 ## Questions?
