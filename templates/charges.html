@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}{{ _('Charges') }}{% endblock %}
+{% block content %}
+<div class="level is-mobile">
+  <div class="level-left"><h1 class="title">{{ _('Supercharger charges in TeslaMate') }}</h1></div>
+  <div class="level-right">
+    <div class="buttons has-addons">
+      <a class="button is-small {{ 'is-info is-selected' if not only_missing }}" href="{{ url_for('ui.charges') }}">{{ _('All') }}</a>
+      <a class="button is-small {{ 'is-info is-selected' if only_missing }}" href="{{ url_for('ui.charges', missing=1) }}">{{ _('Without cost') }}</a>
+    </div>
+  </div>
+</div>
+{% if error %}<div class="notification is-danger is-light">{{ error }}</div>{% endif %}
+{% if rows %}
+<div class="table-container">
+  <table class="table is-fullwidth is-striped is-hoverable is-size-7-mobile">
+    <thead>
+      <tr><th>#</th><th class="nowrap">{{ _('Start') }}</th><th>{{ _('Car') }}</th><th>{{ _('Location') }}</th>
+          <th class="has-text-right">kWh</th><th class="has-text-right">{{ _('Per kWh') }}</th>
+          <th>{{ _('Cost') }}{% if cfg.TARGET_CURRENCY %} ({{ cfg.TARGET_CURRENCY }}){% endif %}</th></tr>
+    </thead>
+    <tbody>
+    {% for r in rows %}
+      <tr>
+        <td class="has-text-grey">{{ r.id }}</td>
+        <td class="nowrap">{{ r.start|dt }}</td>
+        <td>{{ r.car }}</td>
+        <td>{{ r.location or '—' }}</td>
+        <td class="has-text-right">{{ '%.1f'|format(r.kwh) if r.kwh is not none }}</td>
+        <td class="has-text-right">{{ '%.2f'|format(r.cost / r.kwh) if r.cost is not none and r.kwh }}</td>
+        <td>
+          <form method="post" action="{{ url_for('ui.set_cost', charge_id=r.id) }}" class="field has-addons mb-0">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="missing" value="{{ '1' if only_missing else '' }}">
+            <div class="control"><input class="input is-small cost-input {{ 'is-warning' if r.cost is none }}" name="cost" inputmode="decimal"
+                   value="{{ '%.2f'|format(r.cost) if r.cost is not none }}" placeholder="{{ _('missing') }}" aria-label="{{ _('Cost') }}"></div>
+            <div class="control"><button class="button is-small" title="{{ _('Save') }}">✓</button></div>
+          </form>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="help">{{ _('Last 200 charges at Tesla Superchargers (detected from TeslaMate’s charging data). You can enter or correct a cost by hand; an empty field removes it.') }}</p>
+{% elif not error %}
+  <p class="has-text-grey">{{ _('No Supercharger charges found.') if not only_missing else _('All Supercharger charges have a cost.') }}</p>
+{% endif %}
+{% endblock %}

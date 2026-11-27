@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}{{ _('Overview') }}{% endblock %}
+{% block content %}
+<h1 class="title">{{ _('Overview') }}</h1>
+
+<div class="columns is-multiline">
+  <div class="column is-6-tablet is-3-desktop">
+    <div class="box tile-box">
+      <p class="heading">{{ _('Tesla account') }}</p>
+      {% if tesla.mode != 'fleet' %}
+        <p class="has-text-weight-semibold">{{ _('Legacy ownership API') }}</p>
+        <p class="is-size-7 has-text-grey">{{ _('Tesla no longer seems to support it. Switch to the Fleet API.') }}</p>
+      {% elif not tesla.configured %}
+        <p class="has-text-danger has-text-weight-semibold">{{ _('Not configured') }}</p>
+      {% elif tesla.logged_in %}
+        <p class="has-text-success has-text-weight-semibold">{{ _('Connected (Fleet API)') }}</p>
+        <p class="is-size-7 has-text-grey">{{ cfg.TESLA_FLEET_REGION|upper }}</p>
+      {% else %}
+        <p class="has-text-danger has-text-weight-semibold">{{ _('Not logged in') }}</p>
+      {% endif %}
+      <a class="is-size-7" href="{{ url_for('ui.tesla') }}">{{ _('Manage') }} →</a>
+    </div>
+  </div>
+  <div class="column is-6-tablet is-3-desktop">
+    <div class="box tile-box">
+      <p class="heading">{{ _('Next automatic import') }}</p>
+      {% if runner.next_run %}
+        <p class="has-text-weight-semibold">{{ runner.next_run|dt }}</p>
+        <p class="is-size-7 has-text-grey">{{ _('Every night at %(time)s, last %(days)s days', time=cfg.SCHEDULE_TIME, days=cfg.LOOKBACK_DAYS) }}</p>
+      {% else %}
+        <p class="has-text-weight-semibold">{{ _('Off') }}</p>
+      {% endif %}
+      <a class="is-size-7" href="{{ url_for('ui.settings') }}">{{ _('Settings') }} →</a>
+    </div>
+  </div>
+  <div class="column is-6-tablet is-3-desktop">
+    <div class="box tile-box">
+      <p class="heading">{{ _('Last import') }}</p>
+      {% if last_run %}
+        <p class="has-text-weight-semibold">{{ last_run.started|dt }}</p>
+        {% if last_run.error %}
+          <p class="is-size-7 has-text-danger">{{ last_run.error }}</p>
+        {% else %}
+          <p class="is-size-7">{{ _('Saved: %(n)s', n=last_run.updated) }} · {{ _('Not found: %(n)s', n=last_run.not_found) }}{% if last_run.errors %} · <span class="has-text-danger">{{ _('Errors: %(n)s', n=last_run.errors) }}</span>{% endif %}</p>
+        {% endif %}
+        <a class="is-size-7" href="{{ url_for('ui.last_run') }}">{{ _('Details') }} →</a>
+      {% else %}
+        <p class="has-text-grey">{{ _('Not run yet') }}</p>
+      {% endif %}
+    </div>
+  </div>
+  <div class="column is-6-tablet is-3-desktop">
+    <div class="box tile-box">
+      <p class="heading">{{ _('Supercharger charges without cost') }}</p>
+      {% if db_error %}
+        <p class="is-size-7 has-text-danger">{{ db_error }}</p>
+      {% else %}
+        <p class="title is-4 {{ 'has-text-warning-dark' if missing else 'has-text-success' }}">{{ missing }}</p>
+        <a class="is-size-7" href="{{ url_for('ui.charges', missing=1) }}">{{ _('Show') }} →</a>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<h2 class="title is-5 mt-5">{{ _('Import now') }}</h2>
+<p class="mb-3">{{ _('Fetches the Supercharger sessions from Tesla and writes their real cost to the matching TeslaMate charge. Charges that already have a cost are skipped.') }}</p>
+<form method="post" action="{{ url_for('ui.run') }}" class="settings">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <div class="field">
+    <label class="label" for="lookback">{{ _('Days back') }}</label>
+    <input class="input" type="number" min="1" max="9999" id="lookback" name="lookback" value="{{ cfg.LOOKBACK_DAYS }}">
+    <p class="help">{{ _('One request to Tesla per car and 25 sessions. For the first import of your whole history enter e.g. 3650.') }}</p>
+  </div>
+  <div class="buttons">
+    <button class="button" name="mode" value="preview">{{ _('Preview') }}</button>
+    <button class="button is-info" name="mode" value="write"
+            onclick="return confirm({{ _('Write costs to TeslaMate now?')|tojson|forceescape }})">{{ _('Import and save') }}</button>
+  </div>
+</form>
+{% endblock %}

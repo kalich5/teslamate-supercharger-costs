@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block title %}{{ _('Tesla account') }}{% endblock %}
+{% macro done(ok) %}<span class="tag {{ 'is-success' if ok else 'is-light' }} ml-2">{{ _('Done') if ok else _('To do') }}</span>{% endmacro %}
+{% block content %}
+<h1 class="title">{{ _('Tesla account') }}</h1>
+
+{% if tesla.mode != 'fleet' %}
+  <div class="notification is-warning is-light">
+    {{ _('The importer uses the legacy ownership API, which Tesla no longer seems to support. To use the official Fleet API, create a developer app (step 1) and set %(vars)s.', vars='<code>TESLA_CLIENT_ID</code>, <code>TESLA_CLIENT_SECRET</code>'|safe) }}
+  </div>
+{% endif %}
+
+<p class="mb-5">{{ _('Supercharger costs come from the official Tesla Fleet API. The setup is done once; afterwards the login is renewed automatically. A nightly import costs about one request per car, well within the free monthly credit Tesla gives every developer account.') }}</p>
+
+<ol class="steps ml-5">
+  <li>
+    <h2 class="title is-5">{{ _('Developer app') }} {{ done(tesla.configured) }}</h2>
+    <p>{{ _('Create an app at %(link)s with the scopes “Vehicle Information” and “Vehicle Charging Management”, and set a low billing limit.', link='<a href="https://developer.tesla.com" target="_blank" rel="noopener">developer.tesla.com</a>'|safe) }}</p>
+    <table class="table is-narrow mt-2">
+      <tr><th>{{ _('Client ID') }}</th><td>{% if cfg.TESLA_CLIENT_ID %}<code>{{ cfg.TESLA_CLIENT_ID[:8] }}…</code>{% else %}<span class="has-text-danger">{{ _('not set') }}</span>{% endif %} <span class="is-size-7 has-text-grey">TESLA_CLIENT_ID</span></td></tr>
+      <tr><th>{{ _('Client secret') }}</th><td>{% if cfg.TESLA_CLIENT_SECRET %}{{ _('set') }}{% else %}<span class="has-text-danger">{{ _('not set') }}</span>{% endif %} <span class="is-size-7 has-text-grey">TESLA_CLIENT_SECRET</span></td></tr>
+      <tr><th>{{ _('Allowed Redirect URI') }}</th><td><code class="break">{{ cfg.TESLA_REDIRECT_URI }}</code> <span class="is-size-7 has-text-grey">TESLA_REDIRECT_URI</span></td></tr>
+      <tr><th>{{ _('Region') }}</th><td>{{ cfg.TESLA_FLEET_REGION|upper }}{% if tesla.base_url %} <span class="is-size-7 has-text-grey">{{ tesla.base_url }}</span>{% endif %}</td></tr>
+    </table>
+    {% if not redirect_uri_is_ours %}
+      <p class="help">{{ _('Tip: if this page is reachable from your browser, add %(url)s as Allowed Redirect URI and set it as TESLA_REDIRECT_URI — the login then finishes by itself, without copying the URL.', url=callback_url) }}</p>
+    {% endif %}
+    {% if tesla.error %}<p class="has-text-danger mt-2">{{ tesla.error }}</p>{% endif %}
+  </li>
+
+  <li>
+    <h2 class="title is-5">{{ _('Public key') }} {{ done(public_key) }}</h2>
+    <p>{{ _('Tesla requires every app to publish a public key on its domain (the Allowed Origin of the app):') }}<br>
+       <code class="break">https://&lt;{{ _('your-domain') }}&gt;/.well-known/appspecific/com.tesla.3p.public-key.pem</code></p>
+    {% if public_key %}
+      <p class="mt-2">{{ _('Key fingerprint: %(fp)s', fp=key_fingerprint) }}</p>
+      <ul class="mt-2" style="list-style: disc; margin-left: 1.25rem">
+        <li>{{ _('Is this server public on your domain? Then it already serves the key at %(url)s.', url=key_url) }}</li>
+        <li>{{ _('Otherwise download the key and publish it, e.g. on GitHub Pages (add an empty .nojekyll file so the .well-known folder is served).') }}</li>
+      </ul>
+      <a class="button is-small mt-2" href="{{ url_for('ui.tesla_public_key') }}">{{ _('Download public key') }}</a>
+    {% else %}
+      <form method="post" action="{{ url_for('ui.tesla_keys') }}" class="mt-2">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="button is-small is-info">{{ _('Generate key pair') }}</button>
+      </form>
+      <p class="help">{{ _('Already published a key yourself? Then skip this step.') }}</p>
+    {% endif %}
+  </li>
+
+  <li>
+    <h2 class="title is-5">{{ _('Register the app in your region') }} {{ done(partner.domain and partner.region == cfg.TESLA_FLEET_REGION) }}</h2>
+    {% if partner.domain %}<p>{{ _('Registered for %(domain)s (%(region)s) on %(date)s.', domain=partner.domain, region=partner.region|upper, date=partner.registered_at[:10]) }}</p>{% endif %}
+    <form method="post" action="{{ url_for('ui.tesla_register') }}" class="field has-addons mt-2">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <div class="control"><input class="input" name="domain" placeholder="your-name.github.io" value="{{ partner.domain or '' }}" required {{ 'disabled' if not tesla.configured }}></div>
+      <div class="control"><button class="button is-info" {{ 'disabled' if not tesla.configured }}>{{ _('Register') }}</button></div>
+    </form>
+  </li>
+
+  <li>
+    <h2 class="title is-5">{{ _('Log in with your Tesla account') }} {{ done(tesla.logged_in) }}</h2>
+    {% if tesla.logged_in %}
+      <p>{{ _('Logged in. Token renewed: %(time)s', time=tesla.updated_at|dt) }}</p>
+      <div class="buttons mt-2">
+        <form method="post" action="{{ url_for('ui.tesla_vehicles') }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button class="button is-small">{{ _('Load vehicles') }}</button>
+        </form>
+        <form method="post" action="{{ url_for('ui.tesla_logout') }}" class="ml-2"
+              onsubmit="return confirm({{ _('Remove the Tesla login? Imports stop until you log in again.')|tojson|forceescape }})">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button class="button is-small is-danger is-light">{{ _('Log out') }}</button>
+        </form>
+      </div>
+      {% if vehicles is not none %}
+      <table class="table is-narrow mt-3">
+        <thead><tr><th>{{ _('Car') }}</th><th>VIN</th><th>{{ _('In TeslaMate') }}</th><th>{{ _('Imported') }}</th></tr></thead>
+        <tbody>
+        {% for v in vehicles %}
+          <tr><td>{{ v.name or '—' }}</td><td><code>{{ v.vin }}</code></td>
+              <td>{{ '✓' if v.in_teslamate else '—' }}</td><td>{{ '✓' if v.imported else '—' }}</td></tr>
+        {% else %}
+          <tr><td colspan="4" class="has-text-grey">{{ _('No vehicles on this account.') }}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+    {% elif login_url %}
+      <p>{{ _('1. Open the Tesla login, sign in and approve access.') }}</p>
+      <a class="button is-info mt-2 mb-3" href="{{ login_url }}" {{ '' if redirect_uri_is_ours else 'target=_blank rel=noopener' }}>{{ _('Log in with Tesla') }}</a>
+      {% if not redirect_uri_is_ours %}
+        <p>{{ _('2. Tesla then redirects to %(uri)s — the page may not load, that is fine. Copy the full address from the browser and paste it here:', uri=cfg.TESLA_REDIRECT_URI) }}</p>
+        <form method="post" action="{{ url_for('ui.tesla_login') }}" class="field has-addons mt-2">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <div class="control is-expanded"><input class="input" name="callback" placeholder="{{ cfg.TESLA_REDIRECT_URI }}?code=…" required autocomplete="off"></div>
+          <div class="control"><button class="button is-info">{{ _('Finish login') }}</button></div>
+        </form>
+        <p class="help">{{ _('You can also paste an existing Fleet API refresh token.') }}</p>
+      {% endif %}
+    {% else %}
+      <p class="has-text-grey">{{ _('Complete step 1 first.') }}</p>
+    {% endif %}
+  </li>
+</ol>
+{% endblock %}

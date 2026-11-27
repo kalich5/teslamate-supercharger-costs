@@ -1,5 +1,11 @@
 requests>=2.28.0
 psycopg2-binary>=2.9.0
 python-dateutil>=2.8.0
+tzdata>=2024.1
+# Web interface
+flask>=3.0
+flask-babel>=4.0
+waitress>=3.0
+cryptography>=42.0
 # Only needed for the legacy TESLA_API_MODE=ownership
 teslapy>=2.9.0

@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% from "_results.html" import results_table with context %}
+{% block title %}{{ title }}{% endblock %}
+{% block content %}
+<h1 class="title">{{ title }}</h1>
+{% if result.started %}<p class="subtitle is-6 has-text-grey">{{ result.started|dt }}{% if result.lookback_days %} · {{ _('last %(days)s days', days=result.lookback_days) }}{% endif %}</p>{% endif %}
+
+{% if result.error %}
+  <div class="notification is-danger is-light">{{ result.error }}</div>
+{% endif %}
+
+{% if result.results is defined and not result.error or result.results %}
+<div class="tags mb-4">
+  <span class="tag is-medium">{{ _('Sessions from Tesla: %(n)s', n=result.total or 0) }}</span>
+  {% if result.dry_run %}
+    <span class="tag is-medium is-info">{{ _('Will be saved: %(n)s', n=result.would_update or 0) }}</span>
+  {% else %}
+    <span class="tag is-medium is-success">{{ _('Saved: %(n)s', n=result.updated or 0) }}</span>
+  {% endif %}
+  <span class="tag is-medium">{{ _('Already had a cost: %(n)s', n=result.already_set or 0) }}</span>
+  <span class="tag is-medium {{ 'is-warning' if result.not_found }}">{{ _('Not found: %(n)s', n=result.not_found or 0) }}</span>
+  <span class="tag is-medium">{{ _('Free: %(n)s', n=result.no_cost or 0) }}</span>
+  {% if result.errors %}<span class="tag is-medium is-danger">{{ _('Errors: %(n)s', n=result.errors) }}</span>{% endif %}
+</div>
+{% endif %}
+
+{% if result.not_found %}
+  <p class="help mb-3">{{ _('“Not found” means TeslaMate has no charge starting within %(s)s s of the Tesla session (e.g. TeslaMate was offline). Increase the tolerance in Settings, or enter the cost by hand under Charges.', s=cfg.TIME_TOLERANCE_S) }}</p>
+{% endif %}
+
+{% if result.results %}{{ results_table(result.results, cfg.TESLA_API_MODE == 'fleet') }}{% endif %}
+
+{% if result.dry_run and result.would_update %}
+  <form method="post" action="{{ url_for('ui.run') }}" class="buttons">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="lookback" value="{{ result.lookback_days }}">
+    <button class="button is-info" name="mode" value="write">{{ _('Save these costs') }}</button>
+  </form>
+{% endif %}
+
+{% if result.log %}
+<details class="mb-4">
+  <summary class="is-size-7 has-text-grey">{{ _('Log') }}</summary>
+  <pre class="log">{{ result.log|join('\n') }}</pre>
+</details>
+{% endif %}
+<a class="button" href="{{ url_for('ui.index') }}">{{ _('Back') }}</a>
+{% endblock %}

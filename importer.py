@@ -21,6 +21,8 @@ import logging
 import argparse
 import urllib.request
 import xml.etree.ElementTree as ET
+from contextlib import contextmanager
+from urllib.parse import parse_qs, urlencode, urlparse
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
@@ -34,12 +36,20 @@ except ImportError as e:
     sys.exit(1)
 
 try:
+    import fcntl  # file lock for the token (not available on Windows)
+except ImportError:
+    fcntl = None
+
+try:
     import teslapy  # only needed for the legacy ownership API mode
 except ImportError:
     teslapy = None
 
 
 # ── Logging ──────────────────────────────────────────────────────────────────
+
+log = logging.getLogger("teslamate_suc")
+
 
 def setup_logging(log_file: str) -> logging.Logger:
     handlers: list[logging.Handler] = [logging.StreamHandler(sys.stdout)]
@@ -61,66 +71,168 @@ def setup_logging(log_file: str) -> logging.Logger:
     for handler in handlers:
         handler.setFormatter(formatter)
 
-    logging.basicConfig(level=logging.INFO, handlers=handlers)
-    return logging.getLogger("teslamate_suc")
+    logging.basicConfig(level=logging.INFO, handlers=handlers, force=True)
+    return log
 
 
 # ── Configuration ─────────────────────────────────────────────────────────────
+#
+# Settings come from environment variables. Settings saved in the web UI
+# (DATA_DIR/settings.json) take precedence over them, so the web UI and the
+# CLI / cron job always use the same values.
 
-def _cfg(key: str, default: str | None = None, required: bool = False) -> str | None:
-    val = os.getenv(key, default)
-    if required and not val:
-        print(f"ERROR: Required environment variable not set: {key}")
-        sys.exit(1)
-    return val
+class ConfigError(Exception):
+    """Invalid or missing configuration."""
 
 
-# Which Tesla API to use:
-#   fleet     — official Tesla Fleet API (recommended, needs a developer app)
-#   ownership — legacy unofficial endpoint used by the mobile app
-# Defaults to "fleet" when TESLA_CLIENT_ID is set, otherwise "ownership".
-TESLA_API_MODE     = (_cfg("TESLA_API_MODE") or
-                      ("fleet" if os.getenv("TESLA_CLIENT_ID") else "ownership")).lower().strip()
-if TESLA_API_MODE not in ("fleet", "ownership"):
-    print(f"ERROR: TESLA_API_MODE must be 'fleet' or 'ownership', got '{TESLA_API_MODE}'")
-    sys.exit(1)
+class ImporterError(Exception):
+    """A run cannot continue (Tesla API or account problem)."""
 
-TESLA_EMAIL        = _cfg("TESLA_EMAIL",        required=(TESLA_API_MODE == "ownership"))
-TESLA_CACHE_FILE   = _cfg("TESLA_CACHE_FILE",   "/data/tesla_cache.json")
 
-# Optional: limit the import to specific vehicles (comma-separated VINs).
-# Empty = all vehicles on the account.
-TESLA_VIN          = _cfg("TESLA_VIN") or ""
-TESLA_VINS         = [v.strip().upper() for v in TESLA_VIN.split(",") if v.strip()]
+DATA_DIR      = os.getenv("DATA_DIR", "/data")
+SETTINGS_FILE = os.getenv("SETTINGS_FILE", os.path.join(DATA_DIR, "settings.json"))
+LAST_RUN_FILE = os.getenv("LAST_RUN_FILE", os.path.join(DATA_DIR, "last_run.json"))
 
-# Fleet API settings (TESLA_API_MODE=fleet)
-TESLA_CLIENT_ID        = _cfg("TESLA_CLIENT_ID")
-TESLA_CLIENT_SECRET    = _cfg("TESLA_CLIENT_SECRET")
-TESLA_REDIRECT_URI     = _cfg("TESLA_REDIRECT_URI", "https://localhost/callback")
-TESLA_FLEET_REGION     = (_cfg("TESLA_FLEET_REGION", "eu") or "eu").lower().strip()
-TESLA_FLEET_API_URL    = _cfg("TESLA_FLEET_API_URL")  # optional override of the regional URL
-TESLA_FLEET_TOKEN_FILE = _cfg("TESLA_FLEET_TOKEN_FILE", "/data/fleet_token.json")
+# Settings that can be changed in the web UI (stored in SETTINGS_FILE).
+WEB_SETTINGS = (
+    "TARGET_CURRENCY", "LOOKBACK_DAYS", "TIME_TOLERANCE_S", "TESLA_VIN",
+    "TESLA_FLEET_REGION", "SCHEDULE_TIME", "TIMEZONE",
+)
 
-DB_HOST            = _cfg("TESLAMATE_DB_HOST",  "database")
-DB_PORT            = _cfg("TESLAMATE_DB_PORT",  "5432")
-DB_NAME            = _cfg("TESLAMATE_DB_NAME",  "teslamate")
-DB_USER            = _cfg("TESLAMATE_DB_USER",  "teslamate")
-DB_PASS            = _cfg("TESLAMATE_DB_PASS",  required=True)
+# Set by main(): the CLI may ask for the Tesla login on the terminal.
+INTERACTIVE = False
 
-LOOKBACK_DAYS      = int(_cfg("LOOKBACK_DAYS",      "9999"))
-TIME_TOLERANCE_S   = int(_cfg("TIME_TOLERANCE_S",   "120"))
-OVERWRITE_EXISTING = _cfg("OVERWRITE_EXISTING", "false").lower() == "true"
-LOG_FILE           = _cfg("LOG_FILE",           "/logs/importer.log")
 
-# Tesla API request timeout in seconds. Without this the API call can hang forever.
-TESLA_API_TIMEOUT  = int(_cfg("TESLA_API_TIMEOUT", "30"))
+def load_web_settings(path: str | None = None) -> dict:
+    try:
+        with open(path or SETTINGS_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+        return {k: v for k, v in data.items() if k in WEB_SETTINGS} if isinstance(data, dict) else {}
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError) as e:
+        log.warning(f"Cannot read {path or SETTINGS_FILE}: {e}")
+        return {}
 
-# Currency conversion — set TARGET_CURRENCY to convert all costs to one currency.
-# Uses live rates from the European Central Bank (updated daily, no API key needed).
-# Leave empty to store costs in their original currency (no conversion).
-TARGET_CURRENCY    = (_cfg("TARGET_CURRENCY", "") or "").upper().strip()
 
-log = setup_logging(LOG_FILE)
+def save_web_settings(settings: dict, path: str | None = None) -> None:
+    path = Path(path or SETTINGS_FILE)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = {k: v for k, v in settings.items() if k in WEB_SETTINGS}
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(path)
+
+
+def configure(overrides: dict | None = None, environ=None, use_file: bool = True) -> None:
+    """
+    (Re)load the configuration into the module-level settings below.
+
+    Order of precedence: *overrides* > settings.json (web UI) > environment.
+    Raises ConfigError for invalid values; nothing is changed in that case.
+    """
+    values = {k: v for k, v in (os.environ if environ is None else environ).items()}
+    if use_file:
+        values.update({k: str(v) for k, v in load_web_settings().items() if v is not None})
+    values.update({k: str(v) for k, v in (overrides or {}).items() if v is not None})
+
+    def get(key, default=None):
+        v = values.get(key)
+        return v.strip() if isinstance(v, str) and v.strip() else default
+
+    def integer(key, default):
+        try:
+            return int(get(key, default))
+        except ValueError:
+            raise ConfigError(f"{key} must be a whole number, got '{get(key)}'")
+
+    # Which Tesla API to use:
+    #   fleet     — official Tesla Fleet API (recommended, needs a developer app)
+    #   ownership — legacy unofficial endpoint used by the mobile app
+    # Defaults to "fleet" when TESLA_CLIENT_ID is set, otherwise "ownership".
+    mode = (get("TESLA_API_MODE") or ("fleet" if get("TESLA_CLIENT_ID") else "ownership")).lower()
+    if mode not in ("fleet", "ownership"):
+        raise ConfigError(f"TESLA_API_MODE must be 'fleet' or 'ownership', got '{mode}'")
+
+    region = (get("TESLA_FLEET_REGION", "eu")).lower()
+    if region not in FLEET_API_URLS and not get("TESLA_FLEET_API_URL"):
+        raise ConfigError(f"Unknown TESLA_FLEET_REGION '{region}'. Use one of: {list(FLEET_API_URLS)}")
+
+    schedule = get("SCHEDULE_TIME", "03:00")
+    if schedule.lower() in ("off", "none", "-"):
+        schedule = ""
+    if schedule:
+        try:
+            datetime.strptime(schedule, "%H:%M")
+        except ValueError:
+            raise ConfigError(f"SCHEDULE_TIME must be HH:MM (or 'off'), got '{schedule}'")
+
+    # "all" / "none" let the web UI override a value set in the environment.
+    vin = get("TESLA_VIN", "")
+    if vin.lower() == "all":
+        vin = ""
+    currency = get("TARGET_CURRENCY", "").upper()
+    if currency in ("NONE", "-"):
+        currency = ""
+    new = {
+        "TESLA_API_MODE":         mode,
+        "TESLA_EMAIL":            get("TESLA_EMAIL"),
+        "TESLA_CACHE_FILE":       get("TESLA_CACHE_FILE", os.path.join(DATA_DIR, "tesla_cache.json")),
+        # Optional: limit the import to specific vehicles (comma-separated VINs).
+        # Empty = all vehicles on the account.
+        "TESLA_VIN":              vin,
+        "TESLA_VINS":             [v.strip().upper() for v in vin.split(",") if v.strip()],
+        "TESLA_CLIENT_ID":        get("TESLA_CLIENT_ID"),
+        "TESLA_CLIENT_SECRET":    get("TESLA_CLIENT_SECRET"),
+        "TESLA_REDIRECT_URI":     get("TESLA_REDIRECT_URI", "https://localhost/callback"),
+        "TESLA_FLEET_REGION":     region,
+        "TESLA_FLEET_API_URL":    get("TESLA_FLEET_API_URL"),
+        "TESLA_FLEET_TOKEN_FILE": get("TESLA_FLEET_TOKEN_FILE", os.path.join(DATA_DIR, "fleet_token.json")),
+        "FLEET_TOKEN_URL":        get("TESLA_FLEET_TOKEN_URL",
+                                      "https://fleet-auth.prd.vn.cloud.tesla.com/oauth2/v3/token"),
+        "DB_HOST":                get("TESLAMATE_DB_HOST", "database"),
+        "DB_PORT":                get("TESLAMATE_DB_PORT", "5432"),
+        "DB_NAME":                get("TESLAMATE_DB_NAME", "teslamate"),
+        "DB_USER":                get("TESLAMATE_DB_USER", "teslamate"),
+        "DB_PASS":                get("TESLAMATE_DB_PASS"),
+        "DB_TIMEZONE_OVERRIDE":   get("TESLAMATE_DB_TIMEZONE", ""),
+        "LOOKBACK_DAYS":          integer("LOOKBACK_DAYS", "9999"),
+        "TIME_TOLERANCE_S":       integer("TIME_TOLERANCE_S", "120"),
+        "OVERWRITE_EXISTING":     get("OVERWRITE_EXISTING", "false").lower() == "true",
+        "LOG_FILE":               get("LOG_FILE", "/logs/importer.log"),
+        # Tesla API request timeout in seconds. Without this the API call can hang forever.
+        "TESLA_API_TIMEOUT":      integer("TESLA_API_TIMEOUT", "30"),
+        # Currency conversion — convert all costs to one currency using live ECB
+        # rates (no API key needed). Empty = store costs in their original currency.
+        "TARGET_CURRENCY":        currency,
+        # Web UI: daily run at this local time (HH:MM), empty = no automatic runs.
+        "SCHEDULE_TIME":          schedule,
+        "TIMEZONE":               get("TIMEZONE") or get("TZ") or "UTC",
+    }
+    if new["TARGET_CURRENCY"] and (len(new["TARGET_CURRENCY"]) != 3 or not new["TARGET_CURRENCY"].isalpha()):
+        raise ConfigError(f"TARGET_CURRENCY must be a 3-letter code, got '{new['TARGET_CURRENCY']}'")
+    globals().update(new)
+
+
+def validate_config() -> None:
+    """Check the settings a real run needs."""
+    if not DB_PASS:
+        raise ConfigError("Required environment variable not set: TESLAMATE_DB_PASS")
+    if TESLA_API_MODE == "ownership" and not TESLA_EMAIL:
+        raise ConfigError("Required environment variable not set: TESLA_EMAIL "
+                          "(or set TESLA_CLIENT_ID to use the Fleet API)")
+    if TESLA_API_MODE == "fleet" and not TESLA_CLIENT_ID:
+        raise ConfigError("TESLA_CLIENT_ID is required for TESLA_API_MODE=fleet.")
+
+
+FLEET_API_URLS = {
+    "na": "https://fleet-api.prd.na.vn.cloud.tesla.com",
+    "eu": "https://fleet-api.prd.eu.vn.cloud.tesla.com",
+    "cn": "https://fleet-api.prd.cn.vn.cloud.tesla.cn",
+}
+
+# Defaults until configure() is called with the real environment (main / web).
+configure(environ={}, use_file=False)
 
 
 # ── Currency conversion (ECB) ─────────────────────────────────────────────────
@@ -218,8 +330,7 @@ def _select_vehicles(vehicles: list[dict]) -> list[dict]:
     (comma-separated) are used; otherwise every vehicle on the account.
     """
     if not vehicles:
-        log.error("No vehicles found in your Tesla account.")
-        sys.exit(1)
+        raise ImporterError("No vehicles found in your Tesla account.")
 
     available = [v.get("vin") for v in vehicles]
     if not TESLA_VINS:
@@ -227,8 +338,8 @@ def _select_vehicles(vehicles: list[dict]) -> list[dict]:
     else:
         missing = [vin for vin in TESLA_VINS if vin not in available]
         if missing:
-            log.error(f"VIN(s) {missing} not found in your Tesla account. Available VINs: {available}")
-            sys.exit(1)
+            raise ImporterError(f"VIN(s) {missing} not found in your Tesla account. "
+                                f"Available VINs: {available}")
         selected = [v for v in vehicles if v.get("vin") in TESLA_VINS]
 
     for v in selected:
@@ -275,6 +386,8 @@ def _paginate_history(fetch_page, cutoff: datetime) -> list[dict]:
         try:
             response = fetch_page(page)
         except Exception as e:
+            if page == 1:
+                raise  # nothing fetched — report the error instead of "0 sessions"
             log.error(f"Tesla API request failed (page {page}): {e}")
             break
 
@@ -323,18 +436,18 @@ def fetch_charging_sessions(lookback_days: int) -> list[dict]:
 
 # ── Tesla Fleet API (official) ────────────────────────────────────────────────
 
-FLEET_API_URLS = {
-    "na": "https://fleet-api.prd.na.vn.cloud.tesla.com",
-    "eu": "https://fleet-api.prd.eu.vn.cloud.tesla.com",
-    "cn": "https://fleet-api.prd.cn.vn.cloud.tesla.cn",
-}
 FLEET_AUTH_URL  = "https://auth.tesla.com/oauth2/v3/authorize"
-FLEET_TOKEN_URL = _cfg("TESLA_FLEET_TOKEN_URL", "https://fleet-auth.prd.vn.cloud.tesla.com/oauth2/v3/token")
 FLEET_SCOPES    = "openid offline_access vehicle_device_data vehicle_charging_cmds"
 
 
-class FleetApiError(Exception):
-    pass
+class FleetApiError(ImporterError):
+    def __init__(self, message: str, status: int | None = None):
+        super().__init__(message)
+        self.status = status
+
+
+class NotLoggedIn(FleetApiError):
+    """No Fleet API token yet — the one-time login is needed."""
 
 
 class FleetClient:
@@ -343,17 +456,14 @@ class FleetClient:
 
     Tesla rotates refresh tokens — every refresh returns a new one that must
     be saved, otherwise the next run cannot log in. The token file is
-    therefore rewritten after each refresh.
+    therefore rewritten after each refresh, under a file lock so that the web
+    UI and a cron run never refresh at the same time.
     """
 
     def __init__(self) -> None:
         if not TESLA_CLIENT_ID:
-            log.error("TESLA_CLIENT_ID is required for TESLA_API_MODE=fleet.")
-            sys.exit(1)
-        self.base_url = (TESLA_FLEET_API_URL or FLEET_API_URLS.get(TESLA_FLEET_REGION, "")).rstrip("/")
-        if not self.base_url:
-            log.error(f"Unknown TESLA_FLEET_REGION '{TESLA_FLEET_REGION}'. Use one of: {list(FLEET_API_URLS)}")
-            sys.exit(1)
+            raise ConfigError("TESLA_CLIENT_ID is required for TESLA_API_MODE=fleet.")
+        self.base_url = (TESLA_FLEET_API_URL or FLEET_API_URLS[TESLA_FLEET_REGION]).rstrip("/")
         self.token_path = Path(TESLA_FLEET_TOKEN_FILE)
         self.http = requests.Session()
         self.token: dict = self._load_token()
@@ -369,8 +479,8 @@ class FleetClient:
             log.warning(f"Cannot read token file {self.token_path}: {e}")
             return {}
 
-    def _save_token(self, data: dict) -> None:
-        token = dict(self.token)
+    def _save_token(self, data: dict, replace: bool = False) -> None:
+        token = {} if replace else dict(self.token)
         token.update({k: v for k, v in data.items() if v})
         if "expires_in" in data:
             token["expires_at"] = int(time.time()) + int(data["expires_in"])
@@ -381,52 +491,139 @@ class FleetClient:
         os.chmod(tmp, 0o600)
         tmp.replace(self.token_path)
 
+    @contextmanager
+    def _locked(self):
+        """Exclusive lock around token refreshes (shared by all processes)."""
+        self.token_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(str(self.token_path) + ".lock", "w") as lock:
+            if fcntl:
+                fcntl.flock(lock, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                if fcntl:
+                    fcntl.flock(lock, fcntl.LOCK_UN)
+
     def _token_request(self, data: dict) -> dict:
         try:
             r = self.http.post(FLEET_TOKEN_URL, data=data, timeout=TESLA_API_TIMEOUT)
         except requests.RequestException as e:
             raise FleetApiError(f"Token request failed: {e}") from e
         if r.status_code != 200:
-            raise FleetApiError(f"Token request failed: HTTP {r.status_code} {r.text[:300]}")
+            raise FleetApiError(f"Token request failed: HTTP {r.status_code} {r.text[:300]}",
+                                r.status_code)
         return r.json()
 
     # -- authentication -------------------------------------------------------
 
-    def refresh(self) -> None:
-        if not self.token.get("refresh_token"):
-            raise FleetApiError("No refresh token stored.")
-        log.debug("Refreshing Fleet API access token")
-        self._save_token(self._token_request({
-            "grant_type":    "refresh_token",
-            "client_id":     TESLA_CLIENT_ID,
-            "refresh_token": self.token["refresh_token"],
-        }))
+    @property
+    def logged_in(self) -> bool:
+        return bool(self.token.get("refresh_token"))
+
+    def status(self) -> dict:
+        """Token state for display (never contains the tokens themselves)."""
+        self.token = self._load_token()
+        expires_at = self.token.get("expires_at")
+        return {
+            "logged_in":  self.logged_in,
+            "expires_at": datetime.fromtimestamp(expires_at, timezone.utc) if expires_at else None,
+            "updated_at": (datetime.fromtimestamp(self.token_path.stat().st_mtime, timezone.utc)
+                           if self.token_path.exists() else None),
+        }
+
+    def refresh(self, force: bool = False) -> None:
+        with self._locked():
+            # Another process may have refreshed meanwhile — use its token.
+            current = self._load_token()
+            if current.get("refresh_token"):
+                self.token = current
+            if not self.token.get("refresh_token"):
+                raise NotLoggedIn("Not logged in to the Tesla Fleet API.")
+            if not force and self.token.get("access_token") and \
+                    self.token.get("expires_at", 0) - 60 > time.time():
+                return
+            log.debug("Refreshing Fleet API access token")
+            self._save_token(self._token_request({
+                "grant_type":    "refresh_token",
+                "client_id":     TESLA_CLIENT_ID,
+                "refresh_token": self.token["refresh_token"],
+            }))
 
     def ensure_token(self) -> None:
-        if not self.token.get("refresh_token"):
+        if not self.logged_in:
+            self.token = self._load_token()
+        if not self.logged_in:
+            if not INTERACTIVE or not sys.stdin.isatty():
+                raise NotLoggedIn(
+                    "Not logged in to the Tesla Fleet API. Log in on the Tesla page of the "
+                    "web UI, or run once:  docker compose run --rm importer python importer.py --auth")
             log.info("No Fleet API token found — starting interactive authorisation")
             log.info("This only happens ONCE. The token is saved afterwards.")
             self.interactive_auth()
         if not self.token.get("access_token") or self.token.get("expires_at", 0) - 60 < time.time():
             self.refresh()
 
-    def authorize_url(self) -> str:
-        from urllib.parse import urlencode
+    def authorize_url(self, state: str = "teslamate-suc", redirect_uri: str | None = None) -> str:
         return FLEET_AUTH_URL + "?" + urlencode({
             "response_type":         "code",
             "client_id":             TESLA_CLIENT_ID,
-            "redirect_uri":          TESLA_REDIRECT_URI,
+            "redirect_uri":          redirect_uri or TESLA_REDIRECT_URI,
             "scope":                 FLEET_SCOPES,
-            "state":                 "teslamate-suc",
+            "state":                 state,
             "prompt_missing_scopes": "true",
         })
 
-    def interactive_auth(self) -> None:
-        if not sys.stdin.isatty():
-            log.error("Fleet API authorisation needed, but no terminal is attached (cron?).")
-            log.error("Run once interactively:  docker compose run --rm importer --auth")
-            sys.exit(1)
+    def complete_login(self, value: str, expected_state: str | None = None,
+                       redirect_uri: str | None = None) -> None:
+        """
+        Finish the login with either the callback URL Tesla redirected to
+        (contains ?code=…) or an existing refresh token.
+        """
+        value = (value or "").strip()
+        if not value:
+            raise FleetApiError("Nothing entered.")
 
+        if not value.startswith("http"):
+            self._save_token({"refresh_token": value}, replace=True)
+            try:
+                self.refresh(force=True)
+            except FleetApiError:
+                self.logout()
+                raise
+            log.info(f"Fleet API refresh token validated and saved to {self.token_path}")
+            return
+
+        qs = parse_qs(urlparse(value).query)
+        if "error" in qs:
+            raise FleetApiError(f"Authorisation failed: {qs.get('error_description', qs['error'])[0]}")
+        code = (qs.get("code") or [None])[0]
+        if not code:
+            raise FleetApiError("No ?code= parameter found in the pasted URL.")
+        if expected_state and (qs.get("state") or [None])[0] != expected_state:
+            raise FleetApiError("The login link has expired or belongs to another login attempt — "
+                                "start the login again.")
+        if not TESLA_CLIENT_SECRET:
+            raise FleetApiError("TESLA_CLIENT_SECRET is required to exchange the authorisation code.")
+        token = self._token_request({
+            "grant_type":    "authorization_code",
+            "client_id":     TESLA_CLIENT_ID,
+            "client_secret": TESLA_CLIENT_SECRET,
+            "code":          code,
+            "audience":      self.base_url,
+            "redirect_uri":  redirect_uri or TESLA_REDIRECT_URI,
+        })
+        with self._locked():
+            self._save_token(token, replace=True)
+        log.info(f"Fleet API token obtained and saved to {self.token_path}")
+
+    def logout(self) -> None:
+        self.token = {}
+        try:
+            self.token_path.unlink()
+        except FileNotFoundError:
+            pass
+
+    def interactive_auth(self) -> None:
         print()
         print("=" * 65)
         print("  FIRST RUN - Tesla Fleet API authorisation required")
@@ -442,37 +639,13 @@ class FleetClient:
         print()
         print("  Alternatively paste an existing Fleet API refresh_token.")
         print()
-        value = input("  Paste callback URL or refresh_token: ").strip()
-        if not value:
-            log.error("Nothing entered — aborting.")
-            sys.exit(1)
-
-        if value.startswith("http"):
-            from urllib.parse import urlparse, parse_qs
-            qs = parse_qs(urlparse(value).query)
-            if "error" in qs:
-                raise FleetApiError(f"Authorisation failed: {qs.get('error_description', qs['error'])[0]}")
-            code = (qs.get("code") or [None])[0]
-            if not code:
-                raise FleetApiError("No ?code= parameter found in the pasted URL.")
-            if not TESLA_CLIENT_SECRET:
-                raise FleetApiError("TESLA_CLIENT_SECRET is required to exchange the authorisation code.")
-            self._save_token(self._token_request({
-                "grant_type":    "authorization_code",
-                "client_id":     TESLA_CLIENT_ID,
-                "client_secret": TESLA_CLIENT_SECRET,
-                "code":          code,
-                "audience":      self.base_url,
-                "redirect_uri":  TESLA_REDIRECT_URI,
-            }))
-            log.info(f"Fleet API token obtained and saved to {self.token_path}")
-        else:
-            self._save_token({"refresh_token": value})
-            self.refresh()
-            log.info(f"Fleet API refresh token validated and saved to {self.token_path}")
+        self.complete_login(input("  Paste callback URL or refresh_token: "))
 
     def register_partner(self, domain: str) -> dict:
         """One-time registration of the developer app in the region (POST /api/1/partner_accounts)."""
+        domain = (domain or "").strip().removeprefix("https://").removeprefix("http://").strip("/")
+        if not domain:
+            raise FleetApiError("Enter the domain that hosts your public key.")
         if not TESLA_CLIENT_SECRET:
             raise FleetApiError("TESLA_CLIENT_SECRET is required for partner registration.")
         partner = self._token_request({
@@ -482,59 +655,74 @@ class FleetClient:
             "scope":         FLEET_SCOPES,
             "audience":      self.base_url,
         })
-        r = self.http.post(
-            f"{self.base_url}/api/1/partner_accounts",
-            json={"domain": domain},
-            headers={"Authorization": f"Bearer {partner['access_token']}"},
-            timeout=TESLA_API_TIMEOUT,
-        )
+        try:
+            r = self.http.post(
+                f"{self.base_url}/api/1/partner_accounts",
+                json={"domain": domain},
+                headers={"Authorization": f"Bearer {partner['access_token']}"},
+                timeout=TESLA_API_TIMEOUT,
+            )
+        except requests.RequestException as e:
+            raise FleetApiError(f"Partner registration failed: {e}") from e
         if r.status_code != 200:
-            raise FleetApiError(f"Partner registration failed: HTTP {r.status_code} {r.text[:500]}")
+            raise FleetApiError(f"Partner registration failed: HTTP {r.status_code} {r.text[:500]}",
+                                r.status_code)
         return r.json()
 
     # -- requests -------------------------------------------------------------
 
-    def get(self, path: str, params: dict | None = None):
+    HINTS = {
+        401: "Token rejected. Log in again (web UI → Tesla, or --auth).",
+        402: "Payment required — check billing in the Tesla developer dashboard.",
+        403: "Missing scope. Make sure 'vehicle_charging_cmds' is enabled for your app "
+             "and was granted during login (log in again).",
+        412: "App not registered in this region. Register your domain (web UI → Tesla, "
+             "or --register-domain <your-domain>).",
+        421: "Wrong region for this account. Change TESLA_FLEET_REGION (eu / na).",
+        429: "Rate limited by Tesla. Try again later.",
+    }
+
+    def request(self, path: str, params: dict | None = None) -> requests.Response:
         self.ensure_token()
+        r = None
         for attempt in (1, 2):
-            r = self.http.get(
-                f"{self.base_url}{path}",
-                params=params,
-                headers={"Authorization": f"Bearer {self.token['access_token']}"},
-                timeout=TESLA_API_TIMEOUT,
-            )
+            try:
+                r = self.http.get(
+                    f"{self.base_url}{path}",
+                    params=params,
+                    headers={"Authorization": f"Bearer {self.token['access_token']}"},
+                    timeout=TESLA_API_TIMEOUT,
+                )
+            except requests.RequestException as e:
+                raise FleetApiError(f"GET {path} failed: {e}") from e
             if r.status_code == 401 and attempt == 1:
-                self.refresh()  # token revoked/expired early — refresh once and retry
+                self.refresh(force=True)  # token revoked/expired early — refresh once and retry
                 continue
             break
 
         if r.status_code == 200:
-            return r.json()
+            return r
+        hint = self.HINTS.get(r.status_code, "")
+        raise FleetApiError(f"GET {path}: HTTP {r.status_code} {r.text[:300]} {hint}".strip(),
+                            r.status_code)
 
-        hints = {
-            401: "Token rejected. Delete the token file and run with --auth again.",
-            403: "Missing scope. Make sure 'vehicle_charging_cmds' is enabled for your app "
-                 "and was granted during login (re-run with --auth).",
-            412: "App not registered in this region. Run once with --register-domain <your-domain>.",
-            421: "Wrong region for this account. Change TESLA_FLEET_REGION (eu / na).",
-            429: "Rate limited by Tesla. Try again later.",
-            402: "Payment required — check billing in the Tesla developer dashboard.",
-        }
-        hint = hints.get(r.status_code, "")
-        raise FleetApiError(f"GET {path}: HTTP {r.status_code} {r.text[:300]} {hint}".strip())
+    def get(self, path: str, params: dict | None = None):
+        return self.request(path, params).json()
+
+    def vehicles(self) -> list[dict]:
+        resp = self.get("/api/1/vehicles")
+        return (resp.get("response") or []) if isinstance(resp, dict) else []
+
+    def invoice(self, content_id: str, vin: str | None = None) -> bytes:
+        """PDF of a charging invoice (contentId from a session's ``invoices``)."""
+        params = {"vin": vin} if vin else None
+        return self.request(f"/api/1/dx/charging/invoice/{content_id}", params).content
 
 
 def _fetch_fleet(cutoff: datetime, lookback_days: int) -> list[dict]:
     client = FleetClient()
     log.info(f"Connecting to Tesla Fleet API ({client.base_url})")
-    try:
-        vehicles_resp = client.get("/api/1/vehicles")
-    except FleetApiError as e:
-        log.error(str(e))
-        sys.exit(1)
-
-    vehicles = (vehicles_resp.get("response") or []) if isinstance(vehicles_resp, dict) else []
-    selected = _select_vehicles(vehicles)
+    selected = _select_vehicles(client.vehicles())
 
     log.info(f"Fetching charging history for the last {lookback_days} days (since {cutoff:%Y-%m-%d})...")
     all_sessions: list[dict] = []
@@ -567,8 +755,7 @@ def _fetch_ownership(cutoff: datetime, lookback_days: int) -> list[dict]:
     Tesla appears to have stopped supporting it — prefer TESLA_API_MODE=fleet.
     """
     if teslapy is None:
-        log.error("teslapy is not installed — required for TESLA_API_MODE=ownership.")
-        sys.exit(1)
+        raise ConfigError("teslapy is not installed — required for TESLA_API_MODE=ownership.")
 
     log.info(f"Connecting to Tesla ownership API as {TESLA_EMAIL}")
     log.warning("ownership.tesla.com appears to be no longer supported by Tesla. "
@@ -581,6 +768,9 @@ def _fetch_ownership(cutoff: datetime, lookback_days: int) -> list[dict]:
         tesla.timeout = TESLA_API_TIMEOUT
 
         if not tesla.authorized:
+            if not INTERACTIVE or not sys.stdin.isatty():
+                raise ImporterError("Not logged in to the Tesla ownership API. Run once: "
+                                    "docker compose run --rm importer python importer.py")
             log.info("No cached token found — starting interactive authorisation")
             log.info("This only happens ONCE. The token is saved to cache afterwards.")
             refresh_token = _interactive_auth(tesla)
@@ -749,7 +939,7 @@ def _detect_start_date_timezone(cur) -> str:
     visible and easy to override via the TESLAMATE_DB_TIMEZONE env var.
     """
     # Allow explicit override via environment variable
-    override = (_cfg("TESLAMATE_DB_TIMEZONE") or "").strip()
+    override = DB_TIMEZONE_OVERRIDE
     if override:
         log.info(f"  DB timezone: using override '{override}' (TESLAMATE_DB_TIMEZONE)")
         return override
@@ -799,7 +989,27 @@ def _load_car_ids(cur) -> dict[str, int]:
         return {}
 
 
-def import_to_teslamate(sessions: list[dict], dry_run: bool, lookback_days: int) -> dict:
+def _session_result(session: dict, start_dt: datetime, location: str, cost_info: dict | None) -> dict:
+    """One row of the run report (shown in the web UI and stored in last_run.json)."""
+    return {
+        "start":      start_dt,
+        "location":   location,
+        "vin":        session.get("vin"),
+        "session_id": session.get("sessionId"),
+        "invoices":   [
+            {"id": inv.get("contentId"), "name": inv.get("fileName"), "type": inv.get("invoiceType")}
+            for inv in (session.get("invoices") or []) if inv.get("contentId")
+        ],
+        "cost":       cost_info,
+        "tm_id":      None,
+        "tm_cost":    None,
+        "status":     None,
+        "message":    None,
+    }
+
+
+def import_to_teslamate(sessions: list[dict], dry_run: bool, lookback_days: int,
+                        conn=None) -> dict:
     """
     Match each Tesla session against TeslaMate's charging_processes table
     by start timestamp (within TIME_TOLERANCE_S seconds) and write the cost.
@@ -807,7 +1017,9 @@ def import_to_teslamate(sessions: list[dict], dry_run: bool, lookback_days: int)
     Each successful UPDATE is committed immediately so that a DB error on one
     row does not roll back previously written costs.
 
-    Returns a summary dict with counts of outcomes.
+    Returns a summary dict with counts of outcomes and, under "results",
+    one entry per session (status: free, not_found, already_set,
+    would_update, updated or error).
     """
     stats = {
         "total":        len(sessions),
@@ -818,12 +1030,14 @@ def import_to_teslamate(sessions: list[dict], dry_run: bool, lookback_days: int)
         "updated":      0,
         "would_update": 0,
         "errors":       0,
+        "results":      [],
     }
 
     cutoff = datetime.now(timezone.utc) - timedelta(days=lookback_days)
 
     # use try/finally to guarantee the connection is always closed
-    conn = _get_db_connection()
+    own_conn = conn is None
+    conn = conn or _get_db_connection()
     try:
         cur = conn.cursor()
 
@@ -857,9 +1071,12 @@ def import_to_teslamate(sessions: list[dict], dry_run: bool, lookback_days: int)
             )
 
             cost_info = extract_cost(session)
+            result = _session_result(session, start_dt, location, cost_info)
+            stats["results"].append(result)
             if cost_info is None:
                 log.debug(f"  free/zero  {start_dt:%Y-%m-%d %H:%M}  {location}")
                 stats["no_cost"] += 1
+                result["status"] = "free"
                 continue
 
             car_id = car_ids.get((session.get("vin") or "").upper())
@@ -873,7 +1090,7 @@ def import_to_teslamate(sessions: list[dict], dry_run: bool, lookback_days: int)
             # regardless of whether the column is timestamptz or plain timestamp,
             # and regardless of the DB server's locale/timezone setting.
             try:
-                cur.execute(f"""
+                cur.execute("""
                     SELECT id, start_date, cost
                     FROM   charging_processes
                     WHERE  ABS(EXTRACT(EPOCH FROM (
@@ -889,6 +1106,7 @@ def import_to_teslamate(sessions: list[dict], dry_run: bool, lookback_days: int)
                 log.error(f"DB error during lookup: {e}")
                 conn.rollback()
                 stats["errors"] += 1
+                result.update(status="error", message=str(e))
                 continue
 
             row = cur.fetchone()
@@ -899,9 +1117,11 @@ def import_to_teslamate(sessions: list[dict], dry_run: bool, lookback_days: int)
                     f"{cost_info['original_total']:.2f} {cost_info['original_currency']}"
                 )
                 stats["not_found"] += 1
+                result["status"] = "not_found"
                 continue
 
             tm_id, tm_start, tm_cost = row
+            result.update(tm_id=tm_id, tm_cost=float(tm_cost) if tm_cost is not None else None)
 
             if tm_cost is not None and not OVERWRITE_EXISTING:
                 log.debug(
@@ -909,6 +1129,7 @@ def import_to_teslamate(sessions: list[dict], dry_run: bool, lookback_days: int)
                     f"{location}  (already set: {tm_cost:.4f})"
                 )
                 stats["already_set"] += 1
+                result["status"] = "already_set"
                 continue
 
             # Build log line
@@ -929,6 +1150,7 @@ def import_to_teslamate(sessions: list[dict], dry_run: bool, lookback_days: int)
                 log.info(f"  DRY-RUN    #{tm_id}  {tm_start:%Y-%m-%d %H:%M}  "
                          f"{location}  {cost_str}{kwh_str}")
                 stats["would_update"] += 1
+                result["status"] = "would_update"
                 continue
 
             try:
@@ -942,14 +1164,17 @@ def import_to_teslamate(sessions: list[dict], dry_run: bool, lookback_days: int)
                 log.info(f"  UPDATED    #{tm_id}  {tm_start:%Y-%m-%d %H:%M}  "
                          f"{location}  {cost_str}{kwh_str}")
                 stats["updated"] += 1
+                result["status"] = "updated"
             except Exception as e:
                 log.error(f"DB error updating #{tm_id}: {e}")
                 conn.rollback()
                 stats["errors"] += 1
+                result.update(status="error", message=str(e))
 
         cur.close()
     finally:
-        conn.close()
+        if own_conn:
+            conn.close()
 
     return stats
 
@@ -974,12 +1199,97 @@ def log_summary(stats: dict, dry_run: bool) -> None:
     log.info("-" * 55)
 
 
+# ── Run report (shared with the web UI) ───────────────────────────────────────
+
+def _json_default(value):
+    if isinstance(value, datetime):
+        return value.isoformat()
+    raise TypeError(f"not JSON serialisable: {type(value).__name__}")
+
+
+def save_last_run(result: dict, path: str | None = None) -> None:
+    """Store the report of a real (non dry-run) run so the web UI can show it."""
+    try:
+        path = Path(path or LAST_RUN_FILE)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(result, default=_json_default, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(path)
+    except OSError as e:
+        log.warning(f"Cannot save run report: {e}")
+
+
+def load_last_run(path: str | None = None) -> dict | None:
+    try:
+        data = json.loads(Path(path or LAST_RUN_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    for key in ("started", "finished"):
+        if data.get(key):
+            data[key] = dateparser.parse(data[key])
+    for row in data.get("results") or []:
+        if row.get("start"):
+            row["start"] = dateparser.parse(row["start"])
+    return data
+
+
+def run(dry_run: bool = False, lookback_days: int | None = None,
+        sessions: list[dict] | None = None, conn=None, source: str = "cli") -> dict:
+    """
+    One complete import: fetch sessions from Tesla (unless *sessions* is
+    given), match them against TeslaMate and write the costs.
+
+    Returns the stats from import_to_teslamate() plus "started", "finished",
+    "dry_run", "lookback_days", "source" and, if the run failed, "error".
+    Configuration errors are raised as ConfigError before anything happens.
+    """
+    validate_config()
+    lookback_days = lookback_days or LOOKBACK_DAYS
+    started = datetime.now(timezone.utc)
+
+    log.info("=" * 55)
+    log.info("  TeslaMate Supercharger Cost Importer")
+    log.info(f"  Tesla API: {TESLA_API_MODE}")
+    log.info(f"  DB:        {DB_USER}@{DB_HOST}:{DB_PORT}/{DB_NAME}")
+    log.info(f"  Lookback:  {lookback_days} days  |  Tolerance: {TIME_TOLERANCE_S}s")
+    log.info(f"  Overwrite: {OVERWRITE_EXISTING}")
+    if TARGET_CURRENCY:
+        log.info(f"  Currency:  converting all costs -> {TARGET_CURRENCY} (ECB live rates)")
+    else:
+        log.info(f"  Currency:  storing in original currency (no conversion)")
+    if dry_run:
+        log.info("  Mode:      DRY-RUN (no writes)")
+    log.info("=" * 55)
+
+    result = {"total": 0, "no_cost": 0, "too_old": 0, "not_found": 0, "already_set": 0,
+              "updated": 0, "would_update": 0, "errors": 0, "results": []}
+    try:
+        # Load ECB exchange rates if currency conversion is enabled
+        if TARGET_CURRENCY:
+            load_ecb_rates()
+        if sessions is None:
+            sessions = fetch_charging_sessions(lookback_days)
+        if not sessions:
+            log.warning("No sessions to process.")
+        else:
+            result = import_to_teslamate(sessions, dry_run, lookback_days, conn=conn)
+            log_summary(result, dry_run)
+    except (ImporterError, psycopg2.Error) as e:
+        log.error(str(e).strip())
+        result["error"] = str(e).strip()
+
+    result.update(started=started, finished=datetime.now(timezone.utc), dry_run=dry_run,
+                  lookback_days=lookback_days, source=source)
+    if not dry_run:
+        save_last_run(result)
+    return result
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 def main() -> None:
-    # FIX: use a local variable instead of mutating the global LOOKBACK_DAYS,
-    # then pass it explicitly to functions that need it
-    lookback_days = LOOKBACK_DAYS
+    global INTERACTIVE
+    INTERACTIVE = True
 
     parser = argparse.ArgumentParser(
         description="Import real Supercharger costs from Tesla API into TeslaMate",
@@ -995,7 +1305,7 @@ Examples:
   # Historical import of the last 365 days
   python importer.py --lookback 365
 
-  # Fleet API one-time setup
+  # Fleet API one-time setup (also possible in the web UI)
   python importer.py --register-domain your-name.github.io
   python importer.py --auth
         """,
@@ -1005,7 +1315,7 @@ Examples:
     parser.add_argument("--input", "-i", metavar="FILE",
                         help="Load sessions from a JSON file instead of the Tesla API")
     parser.add_argument("--lookback", type=int, metavar="DAYS",
-                        help=f"How many days back to process (default: {lookback_days})")
+                        help="How many days back to process (default: LOOKBACK_DAYS)")
     parser.add_argument("--verbose", "-v", action="store_true",
                         help="Show debug messages (skipped/free sessions)")
     parser.add_argument("--auth", action="store_true",
@@ -1015,18 +1325,21 @@ Examples:
                              "(domain hosting the public key) and exit")
     args = parser.parse_args()
 
+    try:
+        configure()
+    except ConfigError as e:
+        print(f"ERROR: {e}")
+        sys.exit(1)
+    setup_logging(LOG_FILE)
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
 
-    if args.lookback:
-        lookback_days = args.lookback
-
-    if args.auth or args.register_domain:
-        if TESLA_API_MODE != "fleet":
-            log.error("--auth / --register-domain need TESLA_API_MODE=fleet (set TESLA_CLIENT_ID).")
-            sys.exit(1)
-        client = FleetClient()
-        try:
+    try:
+        if args.auth or args.register_domain:
+            if TESLA_API_MODE != "fleet":
+                raise ConfigError("--auth / --register-domain need TESLA_API_MODE=fleet "
+                                  "(set TESLA_CLIENT_ID).")
+            client = FleetClient()
             if args.register_domain:
                 result = client.register_partner(args.register_domain)
                 log.info(f"Partner registration OK ({client.base_url}): {json.dumps(result)}")
@@ -1034,45 +1347,22 @@ Examples:
                 client.interactive_auth()
                 client.ensure_token()
                 log.info("Fleet API login OK.")
-        except FleetApiError as e:
-            log.error(str(e))
-            sys.exit(1)
-        return
+            return
 
-    log.info("=" * 55)
-    log.info("  TeslaMate Supercharger Cost Importer")
-    log.info(f"  Tesla API: {TESLA_API_MODE}")
-    log.info(f"  DB:        {DB_USER}@{DB_HOST}:{DB_PORT}/{DB_NAME}")
-    log.info(f"  Lookback:  {lookback_days} days  |  Tolerance: {TIME_TOLERANCE_S}s")
-    log.info(f"  Overwrite: {OVERWRITE_EXISTING}")
-    if TARGET_CURRENCY:
-        log.info(f"  Currency:  converting all costs -> {TARGET_CURRENCY} (ECB live rates)")
-    else:
-        log.info(f"  Currency:  storing in original currency (no conversion)")
-    if args.dry_run:
-        log.info("  Mode:      DRY-RUN (no writes)")
-    log.info("=" * 55)
+        sessions = None
+        if args.input:
+            log.info(f"Loading sessions from file: {args.input}")
+            with open(args.input) as f:
+                data = json.load(f)
+            sessions = data["data"] if isinstance(data, dict) and "data" in data else data
+            log.info(f"Loaded {len(sessions)} sessions")
 
-    # Load ECB exchange rates if currency conversion is enabled
-    if TARGET_CURRENCY:
-        load_ecb_rates()
-
-    # Load sessions
-    if args.input:
-        log.info(f"Loading sessions from file: {args.input}")
-        with open(args.input) as f:
-            data = json.load(f)
-        sessions = data["data"] if isinstance(data, dict) and "data" in data else data
-        log.info(f"Loaded {len(sessions)} sessions")
-    else:
-        sessions = fetch_charging_sessions(lookback_days)
-
-    if not sessions:
-        log.warning("No sessions to process.")
-        return
-
-    stats = import_to_teslamate(sessions, args.dry_run, lookback_days)
-    log_summary(stats, args.dry_run)
+        result = run(dry_run=args.dry_run, lookback_days=args.lookback, sessions=sessions)
+    except (ConfigError, ImporterError) as e:
+        log.error(str(e))
+        sys.exit(1)
+    if result.get("error"):
+        sys.exit(1)
 
 
 if __name__ == "__main__":

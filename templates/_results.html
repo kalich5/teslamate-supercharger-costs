@@ -1,0 +1,49 @@
+{# Table of Tesla sessions from a run (preview, import or last import). #}
+{% macro results_table(rows, show_invoices=True) %}
+<div class="table-container">
+  <table class="table is-fullwidth is-striped is-hoverable is-size-7-mobile results">
+    <thead><tr>
+      <th class="nowrap">{{ _('Start') }}</th><th>{{ _('Supercharger') }}</th><th>VIN</th>
+      <th class="has-text-right">kWh</th>
+      <th class="has-text-right">{{ _('Tesla invoice') }}</th>
+      <th class="has-text-right">{{ _('Cost in TeslaMate') }}</th>
+      <th>{{ _('TeslaMate charge') }}</th><th>{{ _('Status') }}</th>
+      {% if show_invoices %}<th></th>{% endif %}
+    </tr></thead>
+    <tbody>
+    {% for r in rows %}
+      {% set c = r.cost %}
+      <tr>
+        <td class="nowrap">{{ r.start|dt }}</td>
+        <td>{{ r.location }}</td>
+        <td class="is-size-7 has-text-grey">{{ r.vin or '' }}</td>
+        <td class="has-text-right">{{ '%.1f'|format(c.kwh) if c and c.kwh }}</td>
+        <td class="has-text-right nowrap">
+          {% if c %}{{ c.original_total|money(c.original_currency) }}
+            {% if c.congestion %}<br><span class="is-size-7 has-text-grey">{{ _('incl. idle fee %(fee)s', fee=c.congestion|money) }}</span>{% endif %}
+          {% else %}<span class="has-text-grey">0</span>{% endif %}
+        </td>
+        <td class="has-text-right nowrap">
+          {% if r.status in ('updated', 'would_update') and c %}{{ c.total|money(c.currency) }}
+          {% elif r.tm_cost is not none %}{{ r.tm_cost|money(cfg.TARGET_CURRENCY) }}{% endif %}
+        </td>
+        <td>{% if r.tm_id %}#{{ r.tm_id }}{% endif %}</td>
+        <td>
+          {% set label = STATUS.get(r.status, (r.status or '', 'is-light')) %}
+          <span class="tag {{ label[1] }}">{{ label[0] }}</span>
+          {% if r.message %}<div class="is-size-7 has-text-danger">{{ r.message }}</div>{% endif %}
+        </td>
+        {% if show_invoices %}
+        <td class="nowrap">
+          {% for inv in r.invoices or [] %}
+            <a class="button is-small" target="_blank" rel="noopener"
+               href="{{ url_for('ui.invoice', content_id=inv.id, vin=r.vin) }}">PDF</a>
+          {% endfor %}
+        </td>
+        {% endif %}
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endmacro %}
