@@ -1,0 +1,602 @@
+# Czech translations for PROJECT.
+# Copyright (C) 2026 ORGANIZATION
+# This file is distributed under the same license as the PROJECT project.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: PROJECT VERSION\n"
+"Report-Msgid-Bugs-To: EMAIL@ADDRESS\n"
+"POT-Creation-Date: 2026-11-27 22:02+0000\n"
+"PO-Revision-Date: 2026-11-27 21:54+0000\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language: cs\n"
+"Language-Team: cs <LL@li.org>\n"
+"Plural-Forms: nplurals=3; plural=(n == 1 ? 0 : n >= 2 && n <= 4 ? 1 : 2);\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: Babel 2.19.0\n"
+
+#, python-format
+msgid "%(url)s is not reachable: %(error)s"
+msgstr "%(url)s není dostupná: %(error)s"
+
+#, python-format
+msgid "%(url)s returned HTTP %(status)s."
+msgstr "%(url)s vrátila HTTP %(status)s."
+
+#, python-format
+msgid "%(url)s serves a different key than the one generated here."
+msgstr "%(url)s obsahuje jiný klíč, než jaký byl vygenerován tady."
+
+#, python-format
+msgid "'%(value)s' is not a valid cost."
+msgstr "„%(value)s“ není platná cena."
+
+msgid "1. Open the Tesla login, sign in and approve access."
+msgstr "1. Otevřete přihlášení Tesla, přihlaste se a povolte přístup."
+
+#, python-format
+msgid ""
+"2. Tesla then redirects to %(uri)s — the page may not load, that is fine. Copy the full address "
+"from the browser and paste it here:"
+msgstr ""
+"2. Tesla vás pak přesměruje na %(uri)s — stránka se nemusí načíst, to nevadí. Zkopírujte celou "
+"adresu z prohlížeče a vložte ji sem:"
+
+msgid "A run is in progress, try again in a moment."
+msgstr "Probíhá import, zkuste to za chvíli znovu."
+
+msgid "All"
+msgstr "Vše"
+
+msgid "All Supercharger charges have a cost."
+msgstr "Všechna nabíjení na Superchargerech mají cenu."
+
+msgid "Allowed Redirect URI"
+msgstr "Allowed Redirect URI"
+
+msgid "Already had a cost"
+msgstr "Cena už byla"
+
+#, python-format
+msgid "Already had a cost: %(n)s"
+msgstr "Cena už byla: %(n)s"
+
+msgid "Already published a key yourself? Then skip this step."
+msgstr "Klíč už máte zveřejněný sami? Pak tento krok přeskočte."
+
+msgid "Another run is in progress, try again in a moment."
+msgstr "Už probíhá jiný import, zkuste to za chvíli znovu."
+
+#, python-format
+msgid "App registered for %(domain)s."
+msgstr "Aplikace zaregistrována pro %(domain)s."
+
+msgid "Automatic import every night at"
+msgstr "Automatický import každou noc v"
+
+msgid "Back"
+msgstr "Zpět"
+
+msgid "By default the language of your browser is used, as in TeslaMate."
+msgstr "Ve výchozím stavu se použije jazyk prohlížeče, stejně jako v TeslaMate."
+
+#, python-format
+msgid "Cannot connect to the TeslaMate database: %(error)s"
+msgstr "Nelze se připojit k databázi TeslaMate: %(error)s"
+
+#, python-format
+msgid "Cannot read charges from the TeslaMate database: %(error)s"
+msgstr "Nelze načíst nabíjení z databáze TeslaMate: %(error)s"
+
+#, python-format
+msgid "Cannot read the TeslaMate database: %(error)s"
+msgstr "Nelze číst databázi TeslaMate: %(error)s"
+
+msgid "Car"
+msgstr "Auto"
+
+msgid "Charges"
+msgstr "Nabíjení"
+
+msgid "Client ID"
+msgstr "Client ID"
+
+msgid "Client secret"
+msgstr "Client secret"
+
+msgid ""
+"Comma-separated. Empty = all cars on the Tesla account; each charge is matched to the TeslaMate "
+"car with the same VIN."
+msgstr ""
+"Oddělené čárkou. Prázdné = všechna auta na účtu Tesla; každé nabíjení se přiřadí autu v TeslaMate"
+" se stejným VIN."
+
+msgid "Complete step 1 first."
+msgstr "Nejdřív dokončete krok 1."
+
+msgid "Connected (Fleet API)"
+msgstr "Připojeno (Fleet API)"
+
+msgid "Cost"
+msgstr "Cena"
+
+msgid "Cost in TeslaMate"
+msgstr "Cena v TeslaMate"
+
+#, python-format
+msgid "Cost of charge #%(id)s removed."
+msgstr "Cena nabíjení #%(id)s odstraněna."
+
+#, python-format
+msgid "Cost of charge #%(id)s saved."
+msgstr "Cena nabíjení #%(id)s uložena."
+
+msgid "Costs are converted to this currency using the ECB rate. Empty = keep the currency of the invoice."
+msgstr "Ceny se převedou do této měny kurzem ECB. Prázdné = ponechat měnu z faktury."
+
+#, python-format
+msgid ""
+"Create an app at %(link)s with the scopes “Vehicle Information” and “Vehicle Charging "
+"Management”, and set a low billing limit."
+msgstr ""
+"Založte aplikaci na %(link)s s oprávněními „Vehicle Information“ a „Vehicle Charging Management“ "
+"a nastavte nízký billing limit."
+
+msgid "Currency in TeslaMate"
+msgstr "Měna v TeslaMate"
+
+msgid "Days back"
+msgstr "Počet dní zpět"
+
+msgid "Days must be a whole number."
+msgstr "Počet dní musí být celé číslo."
+
+msgid "Days must be between 1 and 9999."
+msgstr "Počet dní musí být mezi 1 a 9999."
+
+msgid "Details"
+msgstr "Podrobnosti"
+
+msgid "Developer app"
+msgstr "Vývojářská aplikace"
+
+msgid "Done"
+msgstr "Hotovo"
+
+msgid "Download public key"
+msgstr "Stáhnout veřejný klíč"
+
+msgid "EU = Europe, Middle East, Africa; NA = North America and Asia-Pacific."
+msgstr "EU = Evropa, Blízký východ, Afrika; NA = Severní Amerika a Asie a Tichomoří."
+
+msgid ""
+"Empty = no automatic import. Costs do not need to be there right after charging, so once a night "
+"is enough."
+msgstr "Prázdné = bez automatického importu. Ceny nemusí být hned po nabíjení, takže stačí jednou za noc."
+
+msgid "Enter a domain such as your-name.github.io."
+msgstr "Zadejte doménu, např. vase-jmeno.github.io."
+
+msgid "Error"
+msgstr "Chyba"
+
+#, python-format
+msgid "Errors: %(n)s"
+msgstr "Chyby: %(n)s"
+
+#, python-format
+msgid "Every night at %(time)s, last %(days)s days"
+msgstr "Každou noc v %(time)s, posledních %(days)s dní"
+
+msgid ""
+"Fetches the Supercharger sessions from Tesla and writes their real cost to the matching TeslaMate"
+" charge. Charges that already have a cost are skipped."
+msgstr ""
+"Načte nabíjení na Superchargerech z Tesly a zapíše jejich skutečnou cenu k odpovídajícímu "
+"nabíjení v TeslaMate. Nabíjení, která už cenu mají, se přeskočí."
+
+msgid "Finish login"
+msgstr "Dokončit přihlášení"
+
+msgid "Fleet API region"
+msgstr "Region Fleet API"
+
+msgid "Free"
+msgstr "Zdarma"
+
+#, python-format
+msgid "Free: %(n)s"
+msgstr "Zdarma: %(n)s"
+
+msgid "Generate key pair"
+msgstr "Vygenerovat klíče"
+
+msgid ""
+"How far back each automatic import looks. 7 days catches late idle fees and missed nights with a "
+"single request per car."
+msgstr ""
+"Jak daleko zpět se každý automatický import dívá. 7 dní zachytí i později doúčtované poplatky za "
+"stání a vynechané noci, a to jedním requestem na auto."
+
+msgid "Import and save"
+msgstr "Importovat a uložit"
+
+msgid "Import finished"
+msgstr "Import dokončen"
+
+msgid "Import now"
+msgstr "Importovat teď"
+
+msgid "Imported"
+msgstr "Importuje se"
+
+msgid "In TeslaMate"
+msgstr "V TeslaMate"
+
+#, python-format
+msgid "Invalid VIN: %(vins)s"
+msgstr "Neplatné VIN: %(vins)s"
+
+#, python-format
+msgid "Invalid configuration: %(error)s"
+msgstr "Neplatná konfigurace: %(error)s"
+
+msgid "Invalid or expired form token — reload the page and try again."
+msgstr "Neplatný nebo prošlý formulář — načtěte stránku znovu a zkuste to znovu."
+
+#, python-format
+msgid "Is this server public on your domain? Then it already serves the key at %(url)s."
+msgstr "Je tento server veřejně dostupný na vaší doméně? Pak už klíč poskytuje na %(url)s."
+
+#, python-format
+msgid "Key fingerprint: %(fp)s"
+msgstr "Otisk klíče: %(fp)s"
+
+msgid "Key pair generated."
+msgstr "Klíče vygenerovány."
+
+msgid "Language"
+msgstr "Jazyk"
+
+msgid ""
+"Last 200 charges at Tesla Superchargers (detected from TeslaMate’s charging data). You can enter "
+"or correct a cost by hand; an empty field removes it."
+msgstr ""
+"Posledních 200 nabíjení na Tesla Superchargerech (podle dat o nabíjení v TeslaMate). Cenu můžete "
+"zadat nebo opravit ručně; prázdné pole ji odstraní."
+
+msgid "Last import"
+msgstr "Poslední import"
+
+msgid "Legacy ownership API"
+msgstr "Starší ownership API"
+
+msgid "Load vehicles"
+msgstr "Načíst auta"
+
+msgid "Location"
+msgstr "Místo"
+
+msgid "Log"
+msgstr "Log"
+
+msgid "Log in with Tesla"
+msgstr "Přihlásit se přes Tesla"
+
+msgid "Log in with your Tesla account"
+msgstr "Přihlášení k účtu Tesla"
+
+msgid "Log out"
+msgstr "Odhlásit"
+
+msgid "Logged in to Tesla. The token is renewed automatically."
+msgstr "Přihlášeno k Tesle. Token se obnovuje automaticky."
+
+#, python-format
+msgid "Logged in. Token renewed: %(time)s"
+msgstr "Přihlášeno. Token obnoven: %(time)s"
+
+msgid "Login required"
+msgstr "Je potřeba se přihlásit"
+
+msgid "Manage"
+msgstr "Spravovat"
+
+msgid "Matching tolerance (seconds)"
+msgstr "Tolerance párování (sekundy)"
+
+msgid "Maximum difference between the start time at Tesla and in TeslaMate."
+msgstr "Maximální rozdíl mezi časem začátku nabíjení u Tesly a v TeslaMate."
+
+msgid "Next automatic import"
+msgstr "Další automatický import"
+
+msgid "No Supercharger charges found."
+msgstr "Žádná nabíjení na Superchargerech."
+
+msgid "No import has run yet."
+msgstr "Zatím neproběhl žádný import."
+
+#, python-format
+msgid ""
+"No password set — anyone who can reach this page can change your settings and charging costs. Set"
+" %(var)s."
+msgstr ""
+"Není nastavené heslo — kdokoli, kdo se k této stránce dostane, může měnit nastavení i ceny "
+"nabíjení. Nastavte %(var)s."
+
+msgid "No vehicles on this account."
+msgstr "Na tomto účtu nejsou žádná auta."
+
+msgid "Not configured"
+msgstr "Není nastaveno"
+
+msgid "Not found in TeslaMate"
+msgstr "Nenalezeno v TeslaMate"
+
+#, python-format
+msgid "Not found: %(n)s"
+msgstr "Nenalezeno: %(n)s"
+
+msgid "Not logged in"
+msgstr "Nepřihlášeno"
+
+msgid "Not run yet"
+msgstr "Zatím neproběhl"
+
+msgid "Off"
+msgstr "Vypnuto"
+
+msgid ""
+"One request to Tesla per car and 25 sessions. For the first import of your whole history enter "
+"e.g. 3650."
+msgstr "Jeden request na Teslu na auto a 25 nabíjení. Pro první import celé historie zadejte např. 3650."
+
+msgid ""
+"Otherwise download the key and publish it, e.g. on GitHub Pages (add an empty .nojekyll file so "
+"the .well-known folder is served)."
+msgstr ""
+"Jinak klíč stáhněte a zveřejněte, např. na GitHub Pages (přidejte prázdný soubor .nojekyll, aby "
+"se složka .well-known zobrazovala)."
+
+msgid "Overview"
+msgstr "Přehled"
+
+msgid "Overwrite existing costs"
+msgstr "Přepisovat existující ceny"
+
+msgid "Per kWh"
+msgstr "Za kWh"
+
+msgid "Preview"
+msgstr "Náhled"
+
+msgid "Public key"
+msgstr "Veřejný klíč"
+
+#, python-format
+msgid "Public key found at %(url)s."
+msgstr "Veřejný klíč nalezen na %(url)s."
+
+msgid "Region"
+msgstr "Region"
+
+msgid "Register"
+msgstr "Zaregistrovat"
+
+msgid "Register the app in your region"
+msgstr "Registrace aplikace ve vašem regionu"
+
+#, python-format
+msgid "Registered for %(domain)s (%(region)s) on %(date)s."
+msgstr "Zaregistrováno pro %(domain)s (%(region)s) dne %(date)s."
+
+msgid "Remove the Tesla login? Imports stop until you log in again."
+msgstr "Odstranit přihlášení k Tesle? Importy se zastaví, dokud se znovu nepřihlásíte."
+
+msgid "Save"
+msgstr "Uložit"
+
+msgid "Save these costs"
+msgstr "Uložit tyto ceny"
+
+msgid "Saved"
+msgstr "Uloženo"
+
+#, python-format
+msgid "Saved: %(n)s"
+msgstr "Uloženo: %(n)s"
+
+#, python-format
+msgid "See .env.example (%(vars)s, …)."
+msgstr "Viz .env.example (%(vars)s, …)."
+
+#, python-format
+msgid "Sessions from Tesla: %(n)s"
+msgstr "Nabíjení z Tesly: %(n)s"
+
+msgid "Set in Docker (docker-compose.yml / .env) — change it there."
+msgstr "Nastaveno v Dockeru (docker-compose.yml / .env) — změňte to tam."
+
+msgid "Set in the environment"
+msgstr "Nastaveno v prostředí"
+
+msgid "Settings"
+msgstr "Nastavení"
+
+msgid "Settings saved."
+msgstr "Nastavení uloženo."
+
+msgid "Show"
+msgstr "Zobrazit"
+
+msgid "Start"
+msgstr "Začátek"
+
+msgid "Status"
+msgstr "Stav"
+
+msgid "Supercharger"
+msgstr "Supercharger"
+
+msgid "Supercharger charges in TeslaMate"
+msgstr "Nabíjení na Superchargerech v TeslaMate"
+
+msgid "Supercharger charges without cost"
+msgstr "Nabíjení na Superchargerech bez ceny"
+
+msgid "Supercharger costs"
+msgstr "Ceny Superchargerů"
+
+msgid ""
+"Supercharger costs come from the official Tesla Fleet API. The setup is done once; afterwards the"
+" login is renewed automatically. A nightly import costs about one request per car, well within "
+"the free monthly credit Tesla gives every developer account."
+msgstr ""
+"Ceny ze Superchargerů se načítají z oficiálního Tesla Fleet API. Nastavení se dělá jednou, potom "
+"se přihlášení obnovuje automaticky. Noční import stojí zhruba jeden request na auto, což se "
+"pohodlně vejde do měsíčního kreditu, který Tesla dává každému vývojářskému účtu."
+
+msgid "Tesla API"
+msgstr "Tesla API"
+
+msgid "Tesla account"
+msgstr "Účet Tesla"
+
+msgid "Tesla invoice"
+msgstr "Faktura Tesla"
+
+msgid "Tesla login removed."
+msgstr "Přihlášení k Tesle odstraněno."
+
+msgid "Tesla no longer seems to support it. Switch to the Fleet API."
+msgstr "Tesla ho už zřejmě nepodporuje. Přejděte na Fleet API."
+
+msgid "Tesla requires every app to publish a public key on its domain (the Allowed Origin of the app):"
+msgstr ""
+"Tesla vyžaduje, aby každá aplikace zveřejnila veřejný klíč na své doméně (Allowed Origin "
+"aplikace):"
+
+msgid "TeslaMate charge"
+msgstr "Nabíjení v TeslaMate"
+
+msgid "TeslaMate database"
+msgstr "Databáze TeslaMate"
+
+#, python-format
+msgid ""
+"The importer uses the legacy ownership API, which Tesla no longer seems to support. To use the "
+"official Fleet API, create a developer app (step 1) and set %(vars)s."
+msgstr ""
+"Importer používá starší ownership API, které Tesla už zřejmě nepodporuje. Pro oficiální Fleet API"
+" založte vývojářskou aplikaci (krok 1) a nastavte %(vars)s."
+
+msgid "The web UI manages the Tesla Fleet API login. Set TESLA_CLIENT_ID (TESLA_API_MODE=fleet)."
+msgstr ""
+"Webové rozhraní spravuje přihlášení k Tesla Fleet API. Nastavte TESLA_CLIENT_ID "
+"(TESLA_API_MODE=fleet)."
+
+msgid "Time zone"
+msgstr "Časové pásmo"
+
+#, python-format
+msgid ""
+"Tip: if this page is reachable from your browser, add %(url)s as Allowed Redirect URI and set it "
+"as TESLA_REDIRECT_URI — the login then finishes by itself, without copying the URL."
+msgstr ""
+"Tip: pokud je tato stránka dostupná z vašeho prohlížeče, přidejte %(url)s jako Allowed Redirect "
+"URI a nastavte ji jako TESLA_REDIRECT_URI — přihlášení se pak dokončí samo, bez kopírování "
+"adresy."
+
+msgid "To do"
+msgstr "Zbývá"
+
+#, python-format
+msgid "Unexpected error: %(error)s"
+msgstr "Neočekávaná chyba: %(error)s"
+
+#, python-format
+msgid "Unknown timezone '%(tz)s'."
+msgstr "Neznámé časové pásmo „%(tz)s“."
+
+msgid "Vehicles (VIN)"
+msgstr "Auta (VIN)"
+
+msgid "Vehicles loaded from Tesla."
+msgstr "Auta načtena z Tesly."
+
+msgid "Web App"
+msgstr "Webová aplikace"
+
+msgid "Will be saved"
+msgstr "Bude uloženo"
+
+#, python-format
+msgid "Will be saved: %(n)s"
+msgstr "Bude uloženo: %(n)s"
+
+msgid "Without cost"
+msgstr "Bez ceny"
+
+msgid "Write costs to TeslaMate now?"
+msgstr "Zapsat ceny do TeslaMate teď?"
+
+msgid "You can also paste an existing Fleet API refresh token."
+msgstr "Můžete také vložit existující refresh token Fleet API."
+
+msgid ""
+"You can set each of these either here or in Docker (environment in docker-compose.yml or .env). A"
+" value set in Docker takes precedence and is shown here read-only. Settings saved here also apply"
+" to imports started from the command line."
+msgstr ""
+"Každé z těchto nastavení můžete zadat buď tady, nebo v Dockeru (environment v docker-compose.yml "
+"nebo .env). Hodnota z Dockeru má přednost a tady se jen zobrazí. Nastavení uložená tady platí i "
+"pro importy spouštěné z příkazové řádky."
+
+msgid "all vehicles"
+msgstr "všechna auta"
+
+msgid "default"
+msgstr "výchozí"
+
+#, python-format
+msgid "incl. idle fee %(fee)s"
+msgstr "vč. poplatku za stání %(fee)s"
+
+#, python-format
+msgid "last %(days)s days"
+msgstr "posledních %(days)s dní"
+
+msgid "missing"
+msgstr "chybí"
+
+msgid "no"
+msgstr "ne"
+
+msgid "not set"
+msgstr "nenastaveno"
+
+msgid "set"
+msgstr "nastaveno"
+
+msgid "web"
+msgstr "web"
+
+msgid "yes"
+msgstr "ano"
+
+msgid "your-domain"
+msgstr "vaše-doména"
+
+#, python-format
+msgid ""
+"“Not found” means TeslaMate has no charge starting within %(s)s s of the Tesla session (e.g. "
+"TeslaMate was offline). Increase the tolerance in Settings, or enter the cost by hand under "
+"Charges."
+msgstr ""
+"„Nenalezeno“ znamená, že TeslaMate nemá nabíjení, které by začalo do %(s)s s od nabíjení u Tesly "
+"(např. TeslaMate neběžel). Zvyšte toleranci v Nastavení, nebo zadejte cenu ručně v Nabíjení."
+

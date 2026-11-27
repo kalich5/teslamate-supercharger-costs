@@ -1,0 +1,11 @@
+/* Small additions to Bulma — keep this minimal. */
+.settings { max-width: 460px; }
+.tile-box { height: 100%; }
+.tile-box .heading { margin-bottom: 4px; }
+.cost-input { width: 7em; }
+.steps > li { margin-bottom: 1.75rem; }
+.steps > li > .title { margin-bottom: .5rem; }
+pre.log { max-height: 420px; overflow: auto; font-size: 12px; }
+code.break { word-break: break-all; }
+td.nowrap, th.nowrap { white-space: nowrap; }
+.results td { vertical-align: middle; }

@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="{{ locale|replace('_', '-') }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{{ _('Supercharger costs') }}{% endblock %} · TeslaMate</title>
+  <link rel="stylesheet" href="{{ url_for('ui.static', filename='bulma.min.css') }}">
+  <link rel="stylesheet" href="{{ url_for('ui.static', filename='app.css') }}">
+</head>
+<body>
+  <nav class="navbar has-shadow" role="navigation">
+    <div class="container">
+      <div class="navbar-brand">
+        <a class="navbar-item has-text-weight-semibold" href="{{ url_for('ui.index') }}">{{ _('Supercharger costs') }}</a>
+        <a role="button" class="navbar-burger" aria-label="menu" aria-expanded="false"
+           onclick="this.classList.toggle('is-active');document.getElementById('menu').classList.toggle('is-active')">
+          <span aria-hidden="true"></span><span aria-hidden="true"></span><span aria-hidden="true"></span>
+        </a>
+      </div>
+      <div class="navbar-menu" id="menu">
+        <div class="navbar-start">
+          <a class="navbar-item {{ 'is-active' if request.endpoint in ('ui.index', 'ui.run', 'ui.last_run') }}" href="{{ url_for('ui.index') }}">{{ _('Overview') }}</a>
+          <a class="navbar-item {{ 'is-active' if request.endpoint == 'ui.charges' }}" href="{{ url_for('ui.charges') }}">{{ _('Charges') }}</a>
+          <a class="navbar-item {{ 'is-active' if request.endpoint == 'ui.tesla' }}" href="{{ url_for('ui.tesla') }}">{{ _('Tesla account') }}</a>
+          <a class="navbar-item {{ 'is-active' if request.endpoint == 'ui.settings' }}" href="{{ url_for('ui.settings') }}">{{ _('Settings') }}</a>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <section class="section">
+    <div class="container">
+      {% if not auth_enabled %}
+        <div class="notification is-warning is-light">{{ _('No password set — anyone who can reach this page can change your settings and charging costs. Set %(var)s.', var='<code>WEB_PASSWORD</code>'|safe) }}</div>
+      {% endif %}
+      {% for category, message in get_flashed_messages(with_categories=true) %}
+        <div class="notification is-{{ category if category in ('danger', 'warning') else 'success' }} is-light">{{ message }}</div>
+      {% endfor %}
+      {% block content %}{% endblock %}
+    </div>
+  </section>
+</body>
+</html>

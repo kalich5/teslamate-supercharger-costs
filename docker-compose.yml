@@ -1,45 +1,43 @@
----
 # ══════════════════════════════════════════════════════════════
 #  TeslaMate Supercharger Cost Importer — Docker Compose
 #
-#  This service runs as a one-shot container triggered by cron.
-#  It is NOT a long-running daemon.
+#  Runs the web UI at http://<server>:4002/supercharger and imports
+#  the Supercharger costs every night (time set in the web UI).
 #
 #  HOW TO USE:
 #  1. Copy .env.example → .env and fill in your values
-#  2. Run once interactively to authorise the Tesla token:
-#       docker compose run --rm importer
-#  3. Set up a cron job to call: docker compose run --rm importer
+#  2. docker compose up -d --build
+#  3. Open http://<server>:4002/supercharger → "Tesla account" and
+#     follow the one-time setup
 # ══════════════════════════════════════════════════════════════
 
 services:
 
   importer:
-    image: ghcr.io/YOUR_USERNAME/teslamate-supercharger-costs:latest
-    # Or build locally:
-    # build: .
+    build: .
     container_name: teslamate-suc-importer
-    restart: "no"
+    restart: unless-stopped
 
     env_file: .env
 
+    ports:
+      # Behind a reverse proxy you can drop this and route /supercharger
+      # to the container instead (see README).
+      - "${SUC_PORT:-4002}:4002"
+
     volumes:
-      - ./data:/data    # Tesla OAuth token cache (persisted across runs)
+      - ./data:/data    # Tesla token, web settings, keys, last run report
       - ./logs:/logs    # Log files
 
     networks:
       - teslamate       # Must share the network with TeslaMate's database
 
 # ── Network ────────────────────────────────────────────────────
-# If you are adding this service to your EXISTING TeslaMate
-# docker-compose.yml, remove this networks section and instead
-# make sure the importer service is listed under the same
-# network that the `database` service uses.
-#
-# To find your TeslaMate network name:
-#   docker network ls | grep teslamate
-#
+# Attach to the same network as your TeslaMate stack so the container can
+# reach the `database` service by hostname. For a TeslaMate stack in a
+# folder called "teslamate" the network is "teslamate_default".
+# Override with TESLAMATE_NETWORK in .env (see `docker network ls`).
 networks:
   teslamate:
     external: true
-    name: teslamate_default   # ← change to match your actual network name
+    name: ${TESLAMATE_NETWORK:-teslamate_default}

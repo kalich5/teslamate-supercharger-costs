@@ -1,0 +1,582 @@
+# Translations template for PROJECT.
+# Copyright (C) 2026 ORGANIZATION
+# This file is distributed under the same license as the PROJECT project.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: PROJECT VERSION\n"
+"Report-Msgid-Bugs-To: EMAIL@ADDRESS\n"
+"POT-Creation-Date: 2026-11-27 22:02+0000\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: Babel 2.19.0\n"
+
+#, python-format
+msgid "%(url)s is not reachable: %(error)s"
+msgstr ""
+
+#, python-format
+msgid "%(url)s returned HTTP %(status)s."
+msgstr ""
+
+#, python-format
+msgid "%(url)s serves a different key than the one generated here."
+msgstr ""
+
+#, python-format
+msgid "'%(value)s' is not a valid cost."
+msgstr ""
+
+msgid "1. Open the Tesla login, sign in and approve access."
+msgstr ""
+
+#, python-format
+msgid ""
+"2. Tesla then redirects to %(uri)s — the page may not load, that is fine."
+" Copy the full address from the browser and paste it here:"
+msgstr ""
+
+msgid "A run is in progress, try again in a moment."
+msgstr ""
+
+msgid "All"
+msgstr ""
+
+msgid "All Supercharger charges have a cost."
+msgstr ""
+
+msgid "Allowed Redirect URI"
+msgstr ""
+
+msgid "Already had a cost"
+msgstr ""
+
+#, python-format
+msgid "Already had a cost: %(n)s"
+msgstr ""
+
+msgid "Already published a key yourself? Then skip this step."
+msgstr ""
+
+msgid "Another run is in progress, try again in a moment."
+msgstr ""
+
+#, python-format
+msgid "App registered for %(domain)s."
+msgstr ""
+
+msgid "Automatic import every night at"
+msgstr ""
+
+msgid "Back"
+msgstr ""
+
+msgid "By default the language of your browser is used, as in TeslaMate."
+msgstr ""
+
+#, python-format
+msgid "Cannot connect to the TeslaMate database: %(error)s"
+msgstr ""
+
+#, python-format
+msgid "Cannot read charges from the TeslaMate database: %(error)s"
+msgstr ""
+
+#, python-format
+msgid "Cannot read the TeslaMate database: %(error)s"
+msgstr ""
+
+msgid "Car"
+msgstr ""
+
+msgid "Charges"
+msgstr ""
+
+msgid "Client ID"
+msgstr ""
+
+msgid "Client secret"
+msgstr ""
+
+msgid ""
+"Comma-separated. Empty = all cars on the Tesla account; each charge is "
+"matched to the TeslaMate car with the same VIN."
+msgstr ""
+
+msgid "Complete step 1 first."
+msgstr ""
+
+msgid "Connected (Fleet API)"
+msgstr ""
+
+msgid "Cost"
+msgstr ""
+
+msgid "Cost in TeslaMate"
+msgstr ""
+
+#, python-format
+msgid "Cost of charge #%(id)s removed."
+msgstr ""
+
+#, python-format
+msgid "Cost of charge #%(id)s saved."
+msgstr ""
+
+msgid ""
+"Costs are converted to this currency using the ECB rate. Empty = keep the"
+" currency of the invoice."
+msgstr ""
+
+#, python-format
+msgid ""
+"Create an app at %(link)s with the scopes “Vehicle Information” and "
+"“Vehicle Charging Management”, and set a low billing limit."
+msgstr ""
+
+msgid "Currency in TeslaMate"
+msgstr ""
+
+msgid "Days back"
+msgstr ""
+
+msgid "Days must be a whole number."
+msgstr ""
+
+msgid "Days must be between 1 and 9999."
+msgstr ""
+
+msgid "Details"
+msgstr ""
+
+msgid "Developer app"
+msgstr ""
+
+msgid "Done"
+msgstr ""
+
+msgid "Download public key"
+msgstr ""
+
+msgid "EU = Europe, Middle East, Africa; NA = North America and Asia-Pacific."
+msgstr ""
+
+msgid ""
+"Empty = no automatic import. Costs do not need to be there right after "
+"charging, so once a night is enough."
+msgstr ""
+
+msgid "Enter a domain such as your-name.github.io."
+msgstr ""
+
+msgid "Error"
+msgstr ""
+
+#, python-format
+msgid "Errors: %(n)s"
+msgstr ""
+
+#, python-format
+msgid "Every night at %(time)s, last %(days)s days"
+msgstr ""
+
+msgid ""
+"Fetches the Supercharger sessions from Tesla and writes their real cost "
+"to the matching TeslaMate charge. Charges that already have a cost are "
+"skipped."
+msgstr ""
+
+msgid "Finish login"
+msgstr ""
+
+msgid "Fleet API region"
+msgstr ""
+
+msgid "Free"
+msgstr ""
+
+#, python-format
+msgid "Free: %(n)s"
+msgstr ""
+
+msgid "Generate key pair"
+msgstr ""
+
+msgid ""
+"How far back each automatic import looks. 7 days catches late idle fees "
+"and missed nights with a single request per car."
+msgstr ""
+
+msgid "Import and save"
+msgstr ""
+
+msgid "Import finished"
+msgstr ""
+
+msgid "Import now"
+msgstr ""
+
+msgid "Imported"
+msgstr ""
+
+msgid "In TeslaMate"
+msgstr ""
+
+#, python-format
+msgid "Invalid VIN: %(vins)s"
+msgstr ""
+
+#, python-format
+msgid "Invalid configuration: %(error)s"
+msgstr ""
+
+msgid "Invalid or expired form token — reload the page and try again."
+msgstr ""
+
+#, python-format
+msgid ""
+"Is this server public on your domain? Then it already serves the key at "
+"%(url)s."
+msgstr ""
+
+#, python-format
+msgid "Key fingerprint: %(fp)s"
+msgstr ""
+
+msgid "Key pair generated."
+msgstr ""
+
+msgid "Language"
+msgstr ""
+
+msgid ""
+"Last 200 charges at Tesla Superchargers (detected from TeslaMate’s "
+"charging data). You can enter or correct a cost by hand; an empty field "
+"removes it."
+msgstr ""
+
+msgid "Last import"
+msgstr ""
+
+msgid "Legacy ownership API"
+msgstr ""
+
+msgid "Load vehicles"
+msgstr ""
+
+msgid "Location"
+msgstr ""
+
+msgid "Log"
+msgstr ""
+
+msgid "Log in with Tesla"
+msgstr ""
+
+msgid "Log in with your Tesla account"
+msgstr ""
+
+msgid "Log out"
+msgstr ""
+
+msgid "Logged in to Tesla. The token is renewed automatically."
+msgstr ""
+
+#, python-format
+msgid "Logged in. Token renewed: %(time)s"
+msgstr ""
+
+msgid "Login required"
+msgstr ""
+
+msgid "Manage"
+msgstr ""
+
+msgid "Matching tolerance (seconds)"
+msgstr ""
+
+msgid "Maximum difference between the start time at Tesla and in TeslaMate."
+msgstr ""
+
+msgid "Next automatic import"
+msgstr ""
+
+msgid "No Supercharger charges found."
+msgstr ""
+
+msgid "No import has run yet."
+msgstr ""
+
+#, python-format
+msgid ""
+"No password set — anyone who can reach this page can change your settings"
+" and charging costs. Set %(var)s."
+msgstr ""
+
+msgid "No vehicles on this account."
+msgstr ""
+
+msgid "Not configured"
+msgstr ""
+
+msgid "Not found in TeslaMate"
+msgstr ""
+
+#, python-format
+msgid "Not found: %(n)s"
+msgstr ""
+
+msgid "Not logged in"
+msgstr ""
+
+msgid "Not run yet"
+msgstr ""
+
+msgid "Off"
+msgstr ""
+
+msgid ""
+"One request to Tesla per car and 25 sessions. For the first import of "
+"your whole history enter e.g. 3650."
+msgstr ""
+
+msgid ""
+"Otherwise download the key and publish it, e.g. on GitHub Pages (add an "
+"empty .nojekyll file so the .well-known folder is served)."
+msgstr ""
+
+msgid "Overview"
+msgstr ""
+
+msgid "Overwrite existing costs"
+msgstr ""
+
+msgid "Per kWh"
+msgstr ""
+
+msgid "Preview"
+msgstr ""
+
+msgid "Public key"
+msgstr ""
+
+#, python-format
+msgid "Public key found at %(url)s."
+msgstr ""
+
+msgid "Region"
+msgstr ""
+
+msgid "Register"
+msgstr ""
+
+msgid "Register the app in your region"
+msgstr ""
+
+#, python-format
+msgid "Registered for %(domain)s (%(region)s) on %(date)s."
+msgstr ""
+
+msgid "Remove the Tesla login? Imports stop until you log in again."
+msgstr ""
+
+msgid "Save"
+msgstr ""
+
+msgid "Save these costs"
+msgstr ""
+
+msgid "Saved"
+msgstr ""
+
+#, python-format
+msgid "Saved: %(n)s"
+msgstr ""
+
+#, python-format
+msgid "See .env.example (%(vars)s, …)."
+msgstr ""
+
+#, python-format
+msgid "Sessions from Tesla: %(n)s"
+msgstr ""
+
+msgid "Set in Docker (docker-compose.yml / .env) — change it there."
+msgstr ""
+
+msgid "Set in the environment"
+msgstr ""
+
+msgid "Settings"
+msgstr ""
+
+msgid "Settings saved."
+msgstr ""
+
+msgid "Show"
+msgstr ""
+
+msgid "Start"
+msgstr ""
+
+msgid "Status"
+msgstr ""
+
+msgid "Supercharger"
+msgstr ""
+
+msgid "Supercharger charges in TeslaMate"
+msgstr ""
+
+msgid "Supercharger charges without cost"
+msgstr ""
+
+msgid "Supercharger costs"
+msgstr ""
+
+msgid ""
+"Supercharger costs come from the official Tesla Fleet API. The setup is "
+"done once; afterwards the login is renewed automatically. A nightly "
+"import costs about one request per car, well within the free monthly "
+"credit Tesla gives every developer account."
+msgstr ""
+
+msgid "Tesla API"
+msgstr ""
+
+msgid "Tesla account"
+msgstr ""
+
+msgid "Tesla invoice"
+msgstr ""
+
+msgid "Tesla login removed."
+msgstr ""
+
+msgid "Tesla no longer seems to support it. Switch to the Fleet API."
+msgstr ""
+
+msgid ""
+"Tesla requires every app to publish a public key on its domain (the "
+"Allowed Origin of the app):"
+msgstr ""
+
+msgid "TeslaMate charge"
+msgstr ""
+
+msgid "TeslaMate database"
+msgstr ""
+
+#, python-format
+msgid ""
+"The importer uses the legacy ownership API, which Tesla no longer seems "
+"to support. To use the official Fleet API, create a developer app (step "
+"1) and set %(vars)s."
+msgstr ""
+
+msgid ""
+"The web UI manages the Tesla Fleet API login. Set TESLA_CLIENT_ID "
+"(TESLA_API_MODE=fleet)."
+msgstr ""
+
+msgid "Time zone"
+msgstr ""
+
+#, python-format
+msgid ""
+"Tip: if this page is reachable from your browser, add %(url)s as Allowed "
+"Redirect URI and set it as TESLA_REDIRECT_URI — the login then finishes "
+"by itself, without copying the URL."
+msgstr ""
+
+msgid "To do"
+msgstr ""
+
+#, python-format
+msgid "Unexpected error: %(error)s"
+msgstr ""
+
+#, python-format
+msgid "Unknown timezone '%(tz)s'."
+msgstr ""
+
+msgid "Vehicles (VIN)"
+msgstr ""
+
+msgid "Vehicles loaded from Tesla."
+msgstr ""
+
+msgid "Web App"
+msgstr ""
+
+msgid "Will be saved"
+msgstr ""
+
+#, python-format
+msgid "Will be saved: %(n)s"
+msgstr ""
+
+msgid "Without cost"
+msgstr ""
+
+msgid "Write costs to TeslaMate now?"
+msgstr ""
+
+msgid "You can also paste an existing Fleet API refresh token."
+msgstr ""
+
+msgid ""
+"You can set each of these either here or in Docker (environment in "
+"docker-compose.yml or .env). A value set in Docker takes precedence and "
+"is shown here read-only. Settings saved here also apply to imports "
+"started from the command line."
+msgstr ""
+
+msgid "all vehicles"
+msgstr ""
+
+msgid "default"
+msgstr ""
+
+#, python-format
+msgid "incl. idle fee %(fee)s"
+msgstr ""
+
+#, python-format
+msgid "last %(days)s days"
+msgstr ""
+
+msgid "missing"
+msgstr ""
+
+msgid "no"
+msgstr ""
+
+msgid "not set"
+msgstr ""
+
+msgid "set"
+msgstr ""
+
+msgid "web"
+msgstr ""
+
+msgid "yes"
+msgstr ""
+
+msgid "your-domain"
+msgstr ""
+
+#, python-format
+msgid ""
+"“Not found” means TeslaMate has no charge starting within %(s)s s of the "
+"Tesla session (e.g. TeslaMate was offline). Increase the tolerance in "
+"Settings, or enter the cost by hand under Charges."
+msgstr ""
+
